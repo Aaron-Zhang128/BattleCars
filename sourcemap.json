@@ -55213,6 +55213,23 @@
           ]
         },
         {
+          "name": "__NoteProbe",
+          "className": "Model",
+          "guid": "21335748",
+          "children": [
+            {
+              "name": "Note2",
+              "className": "Part",
+              "guid": "21335752"
+            },
+            {
+              "name": "Note3",
+              "className": "Part",
+              "guid": "21335755"
+            }
+          ]
+        },
+        {
           "name": "Arena",
           "className": "Folder",
           "guid": "11687",

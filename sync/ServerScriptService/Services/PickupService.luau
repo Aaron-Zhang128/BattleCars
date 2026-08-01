@@ -101,10 +101,12 @@ local CROWN_POINT_LIGHT = false
 local CROWN_LIGHT_RANGE = 11
 local CROWN_LIGHT_BRIGHTNESS = 2.2
 
--- Money: one decalled note plate + trigger = 2 parts. Sized to the art's own 1:1 crop.
+--[[ Money: one INVISIBLE decalled plate + trigger = 2 parts. The plate is square because
+	the art is, and it is 3.4 rather than the crown band's 2.4 because the image carries
+	~15% of transparent margin — the cash inside it lands at about 2.9 studs, a hair
+	prouder than a crown, which is the read this pickup should have. ]]
 local MONEY_THICKNESS = 0.3
-local MONEY_HEIGHT = 2.8
-local MONEY_WIDTH = 2.8
+local MONEY_PLATE = 3.4
 
 -- Crate: box + two crossed stripes + trigger = 4 parts.
 local CRATE_SIZE = 2.6
