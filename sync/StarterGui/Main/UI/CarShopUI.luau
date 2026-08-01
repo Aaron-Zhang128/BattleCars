@@ -6,8 +6,8 @@
 	(buy / equip / equipped / locked).
 
 	AUTHORITY: the server owns money and ownership. This module NEVER predicts a result —
-	it fires GarageAction and repaints only when OwnedCars / EquippedCar / Coins / Gems
-	change. An unaffordable card still TAPS: the server's own "Need more coins!" teaches
+	it fires GarageAction and repaints only when OwnedCars / EquippedCar / Money / Gems
+	change. An unaffordable card still TAPS: the server's own "Need more money!" teaches
 	more than a dead button, so the locked sheet is a NON-Active Frame and never swallows
 	the click underneath it.
 
@@ -15,7 +15,7 @@
 	            StarterGui template first, the PlayerGui copy as fallback) into ctx.frames.
 	            The kit's own Header.Buttons.Close already satisfies kit.registerFrame.
 	Remote      GarageAction  C->S (action, carId)   S->C (ok, message, carId)
-	Attributes  reads only: Coins Gems EquippedCar OwnedCars ProfileLoaded Alive
+	Attributes  reads only: Money Gems EquippedCar OwnedCars ProfileLoaded Alive
 	Assets      ReplicatedStorage.CrashCore.Assets.Previews[carId] (published by CarFactory
 	            at server init; a missing preview degrades to the car's body colour and
 	            warns exactly once)
@@ -188,7 +188,7 @@ end
 
 local function shortfallText(car, balance: number): string
 	local missing = math.max(0, (car.price or 0) - balance)
-	local word = car.currency == "Gems" and "gems" or "coins"
+	local word = car.currency == "Gems" and "gems" or "money"
 	return "Need " .. MathUtil.comma(missing) .. " more " .. word
 end
 
@@ -213,7 +213,7 @@ local function refreshCard(carId: string)
 	local owned = CarRegistry.owns(player, carId)
 	local equipped = CarRegistry.equippedId(player) == carId
 	local isGems = car.currency == "Gems"
-	local balance = isGems and readMoney(ATTR.GEMS) or readMoney(ATTR.COINS)
+	local balance = isGems and readMoney(ATTR.GEMS) or readMoney(ATTR.MONEY)
 	local affordable = CarRegistry.isFree(car) or balance >= (car.price or 0)
 
 	rec.render.ImageColor3 = owned and UI.PAPER or LOCK_TINT
@@ -444,7 +444,7 @@ local function buildCard(car, order: number, previewModel: Instance?)
 	end
 
 	-- ---------- buttons ----------
-	-- Cars are bought with Coins or Gems only; there is no per-car Robux SKU in
+	-- Cars are bought with Money or Gems only; there is no per-car Robux SKU in
 	-- Config.PRODUCTS, so the kit's Robux button stays off rather than lying about one.
 	local robux = ff(buyButtons, "BuyRobux")
 	if robux then
@@ -656,7 +656,7 @@ function CarShopUI.init(ctx)
 	end)
 
 	-- Reactive repaint: the server's attributes are the only source of truth here.
-	player:GetAttributeChangedSignal(ATTR.COINS):Connect(refreshAllCards)
+	player:GetAttributeChangedSignal(ATTR.MONEY):Connect(refreshAllCards)
 	player:GetAttributeChangedSignal(ATTR.GEMS):Connect(refreshAllCards)
 	player:GetAttributeChangedSignal(ATTR.OWNED):Connect(refreshAllCards)
 	player:GetAttributeChangedSignal(ATTR.EQUIPPED):Connect(refreshAllCards)
@@ -667,7 +667,7 @@ function CarShopUI.init(ctx)
 		warn("CarShopUI: GarageAction remote missing — rows cannot buy or equip")
 	end
 
-	-- First paint waits for the profile: drawing prices against Coins = 0 would lie.
+	-- First paint waits for the profile: drawing prices against Money = 0 would lie.
 	local function paintWhenReady()
 		task.spawn(function()
 			buildCards()

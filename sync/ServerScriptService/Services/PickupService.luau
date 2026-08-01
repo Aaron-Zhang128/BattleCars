@@ -1,9 +1,9 @@
 --[[ PickupService
 	Spawns and awards the three collectibles that give the arena its reason to exist:
-	crowns (the score), coins (persistent currency) and crates (powerups).
+	crowns (the score), money (persistent currency) and crates (powerups).
 
 	DATA FLOW
-		init(ctx)             builds Workspace.Pickups/{Crowns,Coins,Crates} and starts ONE
+		init(ctx)             builds Workspace.Pickups/{Crowns,Money,Crates} and starts ONE
 		                      Heartbeat loop running both spawn cadence and idle animation.
 		startRound()          MatchService, at the start of Match: seeds the field, enables spawning.
 		stopRound()           MatchService, when Match ends: disables spawning, clears the field.
@@ -18,7 +18,7 @@
 
 	ATTRIBUTES
 		Writes NOTHING on the Player. Crowns go through ScoreService.addCrowns (it owns the
-		Crowns attribute and the client "+1" popup), coins through ProfileService.addCoins,
+		Crowns attribute and the client "+1" popup), money through ProfileService.addMoney,
 		the powerup slot through WeaponService.givePowerup.
 		Writes PickupKind / PickupValue on each pickup Model — this service owns those.
 
@@ -70,8 +70,8 @@ local UI = Config.UI
 
 local ROOT_FOLDER = "Pickups"
 local CARS_FOLDER = "Cars" -- read-only; SpawnService owns this folder
-local KIND_ORDER = { "CROWN", "COIN", "CRATE" }
-local KIND_FOLDER = { CROWN = "Crowns", COIN = "Coins", CRATE = "Crates" }
+local KIND_ORDER = { "CROWN", "MONEY", "CRATE" }
+local KIND_FOLDER = { CROWN = "Crowns", MONEY = "Money", CRATE = "Crates" }
 
 -- Pickup-model attributes. Deliberately NOT in Config.ATTR: that section is player state.
 local ATTR_KIND = "PickupKind"
@@ -101,11 +101,10 @@ local CROWN_POINT_LIGHT = false
 local CROWN_LIGHT_RANGE = 11
 local CROWN_LIGHT_BRIGHTNESS = 2.2
 
--- Coin: disc + embossed core + trigger = 3 parts.
-local COIN_THICKNESS = 0.35
-local COIN_DIAMETER = 2.6
-local COIN_CORE_SCALE = 0.6
-local COIN_CORE_PROUD = 1.4 -- core thickness multiplier so it stands off both faces
+-- Money: one decalled note plate + trigger = 2 parts. Sized to the art's own 1:1 crop.
+local MONEY_THICKNESS = 0.3
+local MONEY_HEIGHT = 2.8
+local MONEY_WIDTH = 2.8
 
 -- Crate: box + two crossed stripes + trigger = 4 parts.
 local CRATE_SIZE = 2.6
@@ -151,8 +150,8 @@ local rng = Random.new()
 local rootFolder = nil
 local folders = {} -- kind -> Folder
 local active = {} -- array of pickup records
-local counts = { CROWN = 0, COIN = 0, CRATE = 0 }
-local nextSpawnAt = { CROWN = 0, COIN = 0, CRATE = 0 }
+local counts = { CROWN = 0, MONEY = 0, CRATE = 0 }
+local nextSpawnAt = { CROWN = 0, MONEY = 0, CRATE = 0 }
 local lastGrantAt = {} -- player -> os.clock() of last crate grant
 
 local spawning = false
@@ -399,33 +398,37 @@ local function buildCrown(value: number): (Model, BasePart)
 	return model, trigger
 end
 
-local function buildCoin(): (Model, BasePart)
+--[[ A floating BANKNOTE, not a coin: a thin slab wearing the shop's own cash art on both
+	broad faces, so the thing on the floor, the counter on the rail and the packs in the
+	store are recognisably one currency.
+
+	The art is a Decal, which means the slab underneath must NOT be Neon — neon blows the
+	image out to a flat white card. It is SmoothPlastic in cash green instead, and the green
+	is only ever seen as the note's edge as it turns. The plate faces are the X faces for
+	the same reason the coin's disc did: the pickup spins about Y, so the note presents
+	fully, thins to a line, and presents again — the flash that made the coin findable at
+	speed, kept. ]]
+local function buildMoney(): (Model, BasePart)
 	local model = Instance.new("Model")
-	model.Name = "Pickup_COIN"
-	local trigger = newTrigger(CFG.COIN.radius, model)
+	model.Name = "Pickup_MONEY"
+	local trigger = newTrigger(CFG.MONEY.radius, model)
 
-	-- Cylinder parts already run along X, so an unrotated disc stands on edge and flashes
-	-- as the pickup spins about Y.
-	local disc = newPart(
-		"Disc",
-		Vector3.new(COIN_THICKNESS, COIN_DIAMETER, COIN_DIAMETER),
-		CFG.COIN.color,
-		Enum.Material.Neon,
+	local note = newPart(
+		"Note",
+		Vector3.new(MONEY_THICKNESS, MONEY_HEIGHT, MONEY_WIDTH),
+		CFG.MONEY.color,
+		Enum.Material.SmoothPlastic,
 		model
 	)
-	disc.Shape = Enum.PartType.Cylinder
-	disc.CFrame = CFrame.new()
+	note.CFrame = CFrame.new()
 
-	local coreDiameter = COIN_DIAMETER * COIN_CORE_SCALE
-	local coreDisc = newPart(
-		"Core",
-		Vector3.new(COIN_THICKNESS * COIN_CORE_PROUD, coreDiameter, coreDiameter),
-		UI.GOLD_DEEP,
-		Enum.Material.Neon,
-		model
-	)
-	coreDisc.Shape = Enum.PartType.Cylinder
-	coreDisc.CFrame = CFrame.new()
+	for _, face in ipairs({ Enum.NormalId.Right, Enum.NormalId.Left }) do
+		local decal = Instance.new("Decal")
+		decal.Name = "Face"
+		decal.Texture = Config.ART.MONEY
+		decal.Face = face
+		decal.Parent = note
+	end
 
 	model.PrimaryPart = trigger
 	return model, trigger
@@ -507,8 +510,8 @@ local function createPickup(kind: string, groundPos: Vector3, value: number): bo
 	local model, trigger
 	if kind == "CROWN" then
 		model, trigger = buildCrown(value)
-	elseif kind == "COIN" then
-		model, trigger = buildCoin()
+	elseif kind == "MONEY" then
+		model, trigger = buildMoney()
 	else
 		model, trigger = buildCrate()
 	end
@@ -559,7 +562,7 @@ end
 --[[ Crowns are the SCORE of exactly one mode. Deathmatch, Team Battle, Juggernaut and
 	Elimination all place on something else, so a crown lying in the road there is a
 	pickup that pays nothing and reads as clutter — worse, it teaches the wrong habit in
-	a mode where chasing one gets you rammed. Coins and crates are unaffected: money and
+	a mode where chasing one gets you rammed. Money and crates are unaffected: money and
 	weapons matter in every mode.
 
 	Gated inside trySpawn rather than at the two call sites, so the seed burst, the
@@ -642,10 +645,10 @@ local function award(kind: string, player: Instance, value: number)
 		if score and type(score.addCrowns) == "function" then
 			score.addCrowns(player, value)
 		end
-	elseif kind == "COIN" then
+	elseif kind == "MONEY" then
 		local profile = svc("ProfileService")
-		if profile and type(profile.addCoins) == "function" then
-			profile.addCoins(player, value)
+		if profile and type(profile.addMoney) == "function" then
+			profile.addMoney(player, value)
 		end
 	else
 		PickupService.grantCrate(player)

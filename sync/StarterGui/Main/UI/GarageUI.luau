@@ -5,13 +5,13 @@
 	(price / EQUIP / DRIVING).
 
 	AUTHORITY: the server owns money and ownership. This module NEVER predicts a result —
-	it fires GarageAction and repaints only when OwnedCars / EquippedCar / Coins / Gems
+	it fires GarageAction and repaints only when OwnedCars / EquippedCar / Money / Gems
 	change. A failed action flashes the server's own message on that card.
 
 	Frame       registered as "Garage" (pinned) — LobbyUI opens it via kit.openFrame("Garage").
 	            Lives under ctx.frames, hidden until opened, Close button top-right.
 	Remote      GarageAction  C->S (action, carId)   S->C (ok, message, carId)
-	Attributes  reads only: Coins Gems EquippedCar OwnedCars ProfileLoaded Alive
+	Attributes  reads only: Money Gems EquippedCar OwnedCars ProfileLoaded Alive
 	Assets      ReplicatedStorage.CrashCore.Assets.Previews[carId] (published at server init;
 	            a missing preview degrades to a colored placeholder and warns once)
 
@@ -89,8 +89,13 @@ local FLASH_SECONDS = 1.5
 local CLICK_LOCK = 0.55 -- >= Net.REQUEST_GAP (0.5) so a double tap cannot outrun the reply
 local PREVIEW_TIMEOUT = 20
 
-local GEM = UI.RARITY.EPIC -- gems wear the epic purple, coins the gold ramp
+local GEM = UI.RARITY.EPIC -- gems wear the epic purple
 local GEM_RAMP = { GEM:Lerp(UI.PAPER, 0.5), GEM, GEM:Lerp(UI.INK, 0.3) }
+--[[ Money wears CASH GREEN, not the gold it wore as coins: gold is the crown's colour
+	everywhere else in this game, and two currencies in one ramp is how a player learns
+	the wrong thing about which number a pickup feeds. ]]
+local MONEY = UI.CONFIRM
+local MONEY_RAMP = { UI.LIME, MONEY, MONEY:Lerp(UI.INK, 0.35) }
 
 -- Short words a kid can compare at a glance, in CarRegistry.statBars() key order.
 local STATS = {
@@ -125,7 +130,7 @@ local FLASH_TINT = { good = UI.CONFIRM, bad = UI.DANGER, wait = UI.GOLD }
 -- ==========================================================================
 local kit, net, frames
 local panel, header, headerBase, gridFrame, gridLayout, loadingLabel
-local coinValue, gemValue
+local moneyValue, gemValue
 
 -- carId -> { car, root, render, shade, button, stroke, flash, flashLabel, state, busy,
 --            pending (action in flight, so the reply sounds the right note), order }
@@ -202,8 +207,8 @@ local function paintButton(btn: TextButton, accent: Color3, textColor: Color3, d
 end
 
 local function refreshMoney()
-	if coinValue then
-		coinValue.Text = MathUtil.comma(readMoney(ATTR.COINS))
+	if moneyValue then
+		moneyValue.Text = MathUtil.comma(readMoney(ATTR.MONEY))
 	end
 	if gemValue then
 		gemValue.Text = MathUtil.comma(readMoney(ATTR.GEMS))
@@ -223,7 +228,7 @@ local function refreshCard(carId: string)
 	local owned = CarRegistry.owns(player, carId)
 	local equipped = CarRegistry.equippedId(player) == carId
 	local isGems = car.currency == "Gems"
-	local balance = isGems and readMoney(ATTR.GEMS) or readMoney(ATTR.COINS)
+	local balance = isGems and readMoney(ATTR.GEMS) or readMoney(ATTR.MONEY)
 	local affordable = CarRegistry.isFree(car) or balance >= (car.price or 0)
 
 	-- Locked reads locked, but you can still see exactly what you are missing.
@@ -255,10 +260,10 @@ local function refreshCard(carId: string)
 		btn.Active = true
 		btn.Selectable = true
 		-- Too poor: dimmed with a DANGER price, but still tappable — the server's
-		-- "Need more coins!" teaches more than a dead button.
+		-- "Need more money!" teaches more than a dead button.
 		paintButton(
 			btn,
-			isGems and GEM or UI.GOLD,
+			isGems and GEM or MONEY,
 			affordable and UI.PAPER or UI.DANGER,
 			rec.busy or not affordable
 		)
@@ -361,7 +366,12 @@ end
 -- ==========================================================================
 -- §6) construction
 -- ==========================================================================
-local function moneyChip(parent: Instance, word: string, accent: Color3, ramp: { Color3 }, order: number): TextLabel
+--[[ A wallet pill: what the currency IS on the left, how much of it you have on the right.
+	`image` is the money art — when it is given it REPLACES the word rather than crowding in
+	beside it, because a pill this small cannot carry an icon, a caption and a five-figure
+	number without one of them shrinking to unreadable. Gems have no art of their own and so
+	keep their word. ]]
+local function moneyChip(parent: Instance, word: string, accent: Color3, ramp: { Color3 }, order: number, image: string?): TextLabel
 	local chip = Instance.new("Frame")
 	chip.Name = word
 	chip.Size = UDim2.fromScale(0.46, 1)
@@ -383,19 +393,34 @@ local function moneyChip(parent: Instance, word: string, accent: Color3, ramp: {
 	kit.pill(ring)
 	kit.stroke(ring, 1.5, accent, 0.4)
 
-	kit.label({
-		parent = chip,
-		name = "Word",
-		text = word,
-		font = kit.FONT_BOLD,
-		color = accent,
-		size = UDim2.new(0.42, 0, 0.5, 0),
-		position = UDim2.new(0.08, 0, 0.5, 0),
-		anchor = Vector2.new(0, 0.5),
-		align = Enum.TextXAlignment.Left,
-		cap = 14,
-		stroke = 1.5,
-	})
+	if image then
+		local icon = Instance.new("ImageLabel")
+		icon.Name = "Icon"
+		icon.BackgroundTransparency = 1
+		icon.Image = image
+		icon.ScaleType = Enum.ScaleType.Fit
+		icon.Size = UDim2.new(0, 0, 0.74, 0)
+		icon.Position = UDim2.new(0.07, 0, 0.5, 0)
+		icon.AnchorPoint = Vector2.new(0, 0.5)
+		icon.Parent = chip
+		local square = Instance.new("UIAspectRatioConstraint")
+		square.AspectRatio = 1
+		square.Parent = icon
+	else
+		kit.label({
+			parent = chip,
+			name = "Word",
+			text = word,
+			font = kit.FONT_BOLD,
+			color = accent,
+			size = UDim2.new(0.42, 0, 0.5, 0),
+			position = UDim2.new(0.08, 0, 0.5, 0),
+			anchor = Vector2.new(0, 0.5),
+			align = Enum.TextXAlignment.Left,
+			cap = 14,
+			stroke = 1.5,
+		})
+	end
 
 	return kit.label({
 		parent = chip,
@@ -506,7 +531,7 @@ local function buildHeader()
 	row.Padding = UDim.new(0.03, 0)
 	row.Parent = wallet
 
-	coinValue = moneyChip(wallet, "COINS", UI.GOLD_LIGHT, kit.GOLD_RAMP, 1)
+	moneyValue = moneyChip(wallet, "MONEY", MONEY, MONEY_RAMP, 1, Config.ART.MONEY)
 	gemValue = moneyChip(wallet, "GEMS", GEM, GEM_RAMP, 2)
 end
 
@@ -887,7 +912,7 @@ function GarageUI.init(ctx)
 	end)
 
 	-- Reactive repaint: the server's attributes are the only source of truth here.
-	player:GetAttributeChangedSignal(ATTR.COINS):Connect(function()
+	player:GetAttributeChangedSignal(ATTR.MONEY):Connect(function()
 		refreshMoney()
 		refreshAllCards()
 	end)
@@ -904,7 +929,7 @@ function GarageUI.init(ctx)
 		warn("GarageUI: GarageAction remote missing — cards cannot buy or equip")
 	end
 
-	-- First paint waits for the profile: drawing prices against Coins = 0 would lie.
+	-- First paint waits for the profile: drawing prices against Money = 0 would lie.
 	local function paintWhenReady()
 		task.spawn(function()
 			buildCards()

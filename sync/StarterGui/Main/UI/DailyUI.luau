@@ -220,15 +220,18 @@ local function harvestCard(card: Instance, day: number)
 	return record
 end
 
--- The kit already ships a coin, a gem and a hero icon across its seven mock cards; reuse
--- them per reward kind rather than inventing art.
+--[[ The kit already ships a gem and a hero icon across its seven mock cards, so those are
+	reused rather than invented. MONEY is the exception and is PINNED to Config.ART: the
+	currency has one drawing everywhere else in the game (rail counter, wallet chip, shop
+	packs, the note on the arena floor), and a daily card that paid out a different-looking
+	reward would read as a different reward. ]]
 local function harvestIcons()
 	local function imageOf(day: number)
 		local card = container and container:FindFirstChild(tostring(day))
 		local icon = card and card:FindFirstChild("Icon")
 		return icon and icon:IsA("ImageLabel") and icon.Image or nil
 	end
-	iconForKind.coins = imageOf(1)
+	iconForKind.money = Config.ART.MONEY
 	iconForKind.gems = imageOf(3)
 	iconForKind.car = imageOf(7)
 	iconForKind.spins = imageOf(7)
@@ -412,7 +415,7 @@ local function sanitize(raw)
 	for day = 1, count do
 		local reward = raw.rewards[day]
 		clean.rewards[day] = {
-			kind = type(reward) == "table" and tostring(reward.kind) or "coins",
+			kind = type(reward) == "table" and tostring(reward.kind) or "money",
 			label = type(reward) == "table" and type(reward.label) == "string" and reward.label or "",
 		}
 		clean.claimed[day] = raw.claimed[day] == true

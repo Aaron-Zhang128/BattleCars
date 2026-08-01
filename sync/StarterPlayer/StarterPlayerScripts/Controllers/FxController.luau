@@ -584,17 +584,41 @@ local FX = {
 		HINT_WINDOW = 0.6,
 		HINT_RADIUS = 40,
 		HINT_MAX = 8,
-		TRAIL_LIFETIME = 0.32,
-		TRAIL_WIDTH = 1.6,
-		LIGHT_RANGE = 14,
-		LIGHT_BRIGHTNESS = 2.4,
+		--[=[ CLIENT SHELL. Every projectile in this game is drawn HERE, not by the
+			server: the server's part is stepped, hit-tested and replicated as always,
+			but it is turned invisible on arrival and what you actually watch is a local
+			core welded to it. Two things fall out of that, and both are the point:
+
+			  * the visible shell is free to be far bigger than the hitbox. A rocket you
+			    can see across a 903-stud arena would be an unfair hitbox at that size;
+			    drawn locally it costs nothing and hits exactly as it did before.
+			  * every pixel of it is per-machine, so raising any number here can never
+			    change what the server thinks happened.
+
+			CORE_SCALE multiplies the server part's own size, with CORE_MIN as the floor
+			a small shell is lifted to -- a freeze ball is under a stud across and simply
+			cannot be seen at range at its true size. HALO is the soft outer sphere that
+			makes it read against a bright map. ]=]
+		CORE_SCALE = 2.4,
+		CORE_MIN = 2.6, -- studs: nothing flies smaller than this, whatever the hitbox
+		CORE_TRANSPARENCY = 0,
+		HALO_SCALE = 2.1, -- of the core
+		HALO_TRANSPARENCY = 0.62,
+		--[[ Bumped hard from the values a 0.16-stud tracer wanted. The trail is the
+			part you actually track a shell by at speed -- at 190 studs/s the core is
+			past you before you can follow it, and the streak is what says where it
+			went. ]]
+		TRAIL_LIFETIME = 0.5,
+		TRAIL_WIDTH = 3.6,
+		LIGHT_RANGE = 26,
+		LIGHT_BRIGHTNESS = 4.5,
 		--[[ The flying shell itself. A trail alone is a streak with nothing at the head
 			of it; GLOW is what puts something there, and every flyer gets it. Only the
 			ROCKET has a motor, so only the rocket gets an EXHAUST cone out of the tail
 			— and the two lobbed shells trail SMOKE, which is what makes an arc readable
 			against the sky. ]]
-		GLOW_RATE = 26,
-		GLOW_SIZE = 2.8,
+		GLOW_RATE = 34,
+		GLOW_SIZE = 5.2,
 		GLOW_LIFE = 0.22,
 		EXHAUST_RATE = 55,
 		EXHAUST_SIZE = 3.2,
@@ -660,14 +684,24 @@ local FX = {
 
 	TAG = {
 		NAME = "CrashNametag",
-		WIDTH = 9,
-		HEIGHT = 1.5,
+		WIDTH = 10.5,
+		HEIGHT = 1.8,
 		-- Studs above the ROOFLINE (Hull.WeaponMount), not above the adornee. Was 7.6
 		-- when it was measured off a trim part and landed somewhere different on
 		-- every car.
 		OFFSET = 3.2,
 		MAX_DISTANCE = 250,
+		--[[ A UIStroke is the ONE thing in this tag Roblox measures in pixels, and a
+			billboard shrinks on screen with distance while a pixel does not — so an
+			outline that reads as a hairline over your own car swells into a solid ring
+			on a car across the arena. updateTag therefore drives Thickness off the
+			tag's RENDERED height every frame, which is the same rule the chunk dividers
+			follow by being sized in scale. STROKE is only the value it is built with,
+			for the frame before the first measurement lands. ]]
 		STROKE = 2,
+		STROKE_SCALE = 0.055, -- of the tag's rendered height, in pixels
+		STROKE_MIN = 1,
+		STROKE_MAX = 4,
 		NAME_HEIGHT = 0.5,
 		CROWN_HEIGHT = 0.24,
 		BAR_WIDTH = 0.66,
@@ -683,6 +717,22 @@ local FX = {
 		-- divider would swell into a solid block on a car across the arena.
 		CHUNK_WIDTH = 0.022,
 		CHUNK_MAX = 12,
+		--[=[ THE HEAD BAND — a circular avatar and the driver's @handle across the top
+			of the tag.
+
+			HEAD_HEIGHT is a fraction of the WHOLE billboard, and the rows under it keep
+			the exact proportions they had before the band existed: buildTag grows the
+			tag by 1/(1 - HEAD_HEIGHT) and shrinks every other row by (1 - HEAD_HEIGHT).
+			So this is a real dial, not something that quietly re-tunes the HP bar, and
+			0 removes the band outright.
+
+			The picture is an `rbxthumb://` CONTENT STRING, not a fetched image: the
+			client resolves it with no web call, no yield and no cache of our own, where
+			Players:GetUserThumbnailAsync would block this builder in the middle of a
+			car spawn. An id that never resolves simply leaves the ink disc showing. ]=]
+		HEAD_HEIGHT = 0.40,
+		HEAD_THUMB = "rbxthumb://type=AvatarHeadShot&id=%d&w=150&h=150",
+		HEAD_BACKING = 0.1, -- the disc behind a head that has not loaded yet
 		--[[ YOUR OWN car gets a tag too, which is how Crash of Cars reads: the bar you
 			care about most floats where you are already looking, instead of only at the
 			edge of the screen. It is STRIPPED though — no name, no crowns. You know who
@@ -690,6 +740,12 @@ local FX = {
 			own roof is the one thing guaranteed to sit between you and the road ahead.
 			SELF_ENABLED = false goes back to rivals-only. ]]
 		SELF_ENABLED = true,
+		--[[ ...and as of this pass it carries the head and the @handle as well, on
+			request. That IS the trade the comment above describes — a taller tag over
+			your own roof is more of the road you cannot see — so it is one flag:
+			false restores the stripped, bar-only self tag and the two SELF_ sizes
+			below with it. ]]
+		SELF_SHOW_NAME = true,
 		SELF_WIDTH = 6.2, -- shorter than a rival tag because there is no text to hold
 		SELF_HEIGHT = 0.62,
 		SELF_OFFSET = 2.2, -- lower too, so it hugs the roof rather than floating over it
@@ -718,7 +774,32 @@ local FX = {
 		LOW_STROKE_COLOR = UI.DANGER,
 		POP_TIME = 0.24, -- spawn pop, so a tag ARRIVES instead of appearing
 		POP_SCALE = 0.55,
-		GLOSS_LOW = 0.72, -- bottom stop of the fill's multiply gradient
+		--[=[ THE FILL'S GLOSS IS A TUBE, NOT A RAMP. Bright at the top edge, dipping
+			through the body, lifting again for the reflected light near the bottom, then
+			shading off at the very bottom. That second lift is the whole difference
+			between a bar that reads as round and one that reads as a painted rectangle,
+			and it costs nothing — it is four extra keypoints on a gradient that was
+			already there.
+
+			A UIGradient MULTIPLIES, so every stop below can only ever darken: the hue
+			stays hpColor's alone and there is no second colour to keep in step with it.
+			It also means the gradient cannot put a HIGHLIGHT on anything, which is what
+			SHEEN below is for. ]=]
+		GLOSS_TOP = 1.00, -- the top edge is left untouched
+		GLOSS_KNEE = 0.92,
+		GLOSS_BODY = 0.74, -- the dip through the middle
+		GLOSS_LIFT = 0.90, -- reflected light coming back up off the lower curve
+		GLOSS_LOW = 0.66, -- bottom stop of the fill's multiply gradient
+		--[[ THE SHINE — a white sliver lying along the top of the fill, fading out down
+			its own transparency ramp. It is the one thing a multiply gradient cannot
+			do. It sits above the fill and BELOW the chunk dividers, so a segmented bar
+			still reads its segments through it, and the fill CLIPS it so it follows the
+			pill's rounded ends instead of squaring them off. ]]
+		SHEEN_HEIGHT = 0.46,
+		SHEEN_TOP = 0.5, -- transparency at the top of the sliver, fading to 1 at its base
+		-- The empty TRACK is a RECESS, and light comes from above: it is darkest at the
+		-- top, which is the opposite of the fill sitting in it.
+		TRACK_TOP = 0.55,
 		FALLBACK_NAME = "Driver",
 		RESOLVE_TIMEOUT = 5,
 		RESOLVE_POLL = 0.1,
@@ -1765,8 +1846,16 @@ end
 	only the missile). The SERVER's part is left exactly as it is, because that is the
 	thing the server steps and everyone agrees on; we only hide it and weld the mesh
 	on. So a missing asset degrades to the neon proxy you always had, never to an
-	invisible rocket. The mesh is authored nose-along--Z and the shell's CFrame is
-	built with CFrame.lookAt, so they already agree — no correction here. ]]
+	invisible rocket.
+
+	THE ASSET'S OWN ROTATION IS THE CORRECTION, and it must be carried over. These
+	models were authored facing +X and the normaliser baked a 90 deg yaw into every
+	part's stored CFrame to point them down -Z — the missile's nose included. Assigning
+	the shell's CFrame straight onto the clone THREW THAT AWAY, so the rocket flew
+	sideways-on: nose pointing 90 deg to the right of travel, all the way to the target.
+	The shell is built with CFrame.lookAt (-Z along travel, no roll), so
+	shellCFrame * assetRotation is the pose the normaliser intended. Never write a
+	literal angle here — re-run the normaliser and this keeps agreeing with it. ]]
 local function skinFlyer(part: BasePart, kind: string?): boolean
 	if not kind then
 		return false
@@ -1784,7 +1873,8 @@ local function skinFlyer(part: BasePart, kind: string?): boolean
 	mesh.CanQuery = false
 	mesh.CanTouch = false
 	mesh.CastShadow = false
-	mesh.CFrame = part.CFrame
+	local nose = mesh.CFrame.Rotation -- read BEFORE it is overwritten: see above
+	mesh.CFrame = part.CFrame * nose
 	mesh.Parent = part
 
 	local weld = Instance.new("WeldConstraint")
@@ -1799,18 +1889,81 @@ end
 --[[ `kind` is what separates a missile from a thrown rock: it is the only thing here
 	that knows whether this shell has a motor behind it. Unknown kinds still get the
 	trail, the light and the glow, so a new weapon is never invisible. ]]
-local function decorateFlyer(part: BasePart, color: Color3, kind: string?)
+local function decorateFlyer(part: BasePart, color: Color3, kind: string?, skinned: boolean?)
 	local cfg = FX.PROJECTILE
-	local half = math.max(part.Size.X, part.Size.Y) * 0.5
+
+	--[=[ THE SERVER'S PART IS THE AUTHORITY, NOT THE PICTURE. It is what the server
+		steps, what every hit is resolved against and the one thing every machine agrees
+		on -- and from here on nobody looks at it. It goes invisible and a local core is
+		welded on in its place (skinFlyer has already done exactly this for the two
+		shells that ship a real mesh).
+
+		Not anchored, welded: the weld makes the visual ride every server CFrame write
+		for free, with nothing to update per frame and nothing to clean up -- destroying
+		the shell takes the whole decoration with it. ]=]
+	local visual = part
+	if not skinned then
+		local size = math.max(math.max(part.Size.X, part.Size.Y, part.Size.Z) * cfg.CORE_SCALE, cfg.CORE_MIN)
+
+		local core = Instance.new("Part")
+		core.Name = "FxCore"
+		core.Shape = Enum.PartType.Ball
+		core.Size = Vector3.new(size, size, size)
+		core.Color = hot(color, 0.55)
+		core.Material = Enum.Material.Neon
+		core.Transparency = cfg.CORE_TRANSPARENCY
+		core.Anchored = false
+		core.Massless = true
+		core.CanCollide = false
+		core.CanQuery = false
+		core.CanTouch = false
+		core.CastShadow = false
+		core.CFrame = part.CFrame
+		core.Parent = part
+
+		local coreWeld = Instance.new("WeldConstraint")
+		coreWeld.Part0 = part
+		coreWeld.Part1 = core
+		coreWeld.Parent = core
+
+		-- The soft outer sphere. It is what keeps a shell readable against a bright
+		-- floor, where a neon core alone flattens into the background.
+		local halo = Instance.new("Part")
+		halo.Name = "FxHalo"
+		halo.Shape = Enum.PartType.Ball
+		halo.Size = core.Size * cfg.HALO_SCALE
+		halo.Color = color
+		halo.Material = Enum.Material.Neon
+		halo.Transparency = cfg.HALO_TRANSPARENCY
+		halo.Anchored = false
+		halo.Massless = true
+		halo.CanCollide = false
+		halo.CanQuery = false
+		halo.CanTouch = false
+		halo.CastShadow = false
+		halo.CFrame = part.CFrame
+		halo.Parent = part
+
+		local haloWeld = Instance.new("WeldConstraint")
+		haloWeld.Part0 = part
+		haloWeld.Part1 = halo
+		haloWeld.Parent = halo
+
+		visual = core
+	end
+	part.Transparency = 1 -- local only; the server never writes this again
+
+	-- Off the VISUAL, not the hitbox: the trail has to span the thing you can see.
+	local half = math.max(visual.Size.X, visual.Size.Y) * 0.5
 	local a0 = Instance.new("Attachment")
 	a0.Name = "FxTrailA"
 	a0.Position = Vector3.new(-half, 0, 0)
-	a0.Parent = part
+	a0.Parent = visual
 
 	local a1 = Instance.new("Attachment")
 	a1.Name = "FxTrailB"
 	a1.Position = Vector3.new(half, 0, 0)
-	a1.Parent = part
+	a1.Parent = visual
 
 	local trail = Instance.new("Trail")
 	trail.Name = "FxTrail"
@@ -1832,7 +1985,7 @@ local function decorateFlyer(part: BasePart, color: Color3, kind: string?)
 		NumberSequenceKeypoint.new(0, 0.1),
 		NumberSequenceKeypoint.new(1, 1),
 	})
-	trail.Parent = part
+	trail.Parent = visual
 
 	local light = Instance.new("PointLight")
 	light.Name = "FxLight"
@@ -1846,7 +1999,7 @@ local function decorateFlyer(part: BasePart, color: Color3, kind: string?)
 	-- SHED along the path rather than dragged with it.
 	local glowAtt = Instance.new("Attachment")
 	glowAtt.Name = "FxGlowAtt"
-	glowAtt.Parent = part
+	glowAtt.Parent = visual
 
 	local glow = Instance.new("ParticleEmitter")
 	glow.Name = "FxGlow"
@@ -2016,8 +2169,8 @@ local function onProjectileAdded(child: Instance)
 		if kind == "MINE" then
 			decorateMine(part, color)
 		else
-			skinFlyer(part, kind)
-			decorateFlyer(part, color, kind)
+			local skinned = skinFlyer(part, kind)
+			decorateFlyer(part, color, kind, skinned)
 			-- Flyers are short-lived; release the budget when the part goes.
 			child.Destroying:Once(function()
 				decorated = math.max(0, decorated - 1)
@@ -3483,6 +3636,18 @@ end
 	number the mode places on, so this reads ONE attribute and never branches on the
 	mode itself — only the noun does. ]]
 local function refreshScore(entry: any)
+	--[[ BOUNTY is the one mode where the line over a car is NOT the standings number.
+		What matters mid-round is what that car is worth to you RIGHT NOW -- a price
+		that has been climbing for as long as they have stayed alive -- while the
+		points they have banked are already on the board in the corner. Same label,
+		same one attribute read, different question. ]]
+	if GameModes.hasBounty() then
+		local price = GameModes.bountyOf(entry.player)
+		entry.crowns.Visible = not entry.isSelf and price > 0
+		entry.crowns.Text = "$" .. MathUtil.comma(price)
+		return
+	end
+
 	local count = entry.player and entry.player:GetAttribute(ATTR.SCORE) or 0
 	if type(count) ~= "number" then
 		count = 0
@@ -3613,6 +3778,17 @@ local function updateTag(entry: any, dt: number, now: number)
 		entry.tinted = false
 	end
 
+	--[[ The outline, in pixels, taken from what the tag ACTUALLY measures this frame —
+		see FX.TAG.STROKE_SCALE. Written only when it has really moved, so a grid of
+		tags sitting at one distance costs one comparison each and no property writes. ]]
+	local px = math.clamp(entry.gui.AbsoluteSize.Y * T.STROKE_SCALE, T.STROKE_MIN, T.STROKE_MAX)
+	if math.abs(px - entry.strokePx) > 0.05 then
+		entry.strokePx = px
+		for _, stroke in ipairs(entry.strokes) do
+			stroke.Thickness = px
+		end
+	end
+
 	if entry.popT < 1 then
 		entry.popT = math.min(1, entry.popT + dt / T.POP_TIME)
 		-- back-out ease: it overshoots 1 near the end, which is what makes it a POP
@@ -3636,22 +3812,46 @@ local function updateTags(dt: number, now: number)
 end
 
 local function buildTag(car: Model, adornee: BasePart, driver: Player?, isSelf: boolean?)
+	--[[ NAMED tags carry the head band and the @handle; a stripped one is the bar
+		alone. `rest` is the share of the billboard left under the band, and every row
+		below is multiplied by it while the billboard itself is divided by it — which
+		is what keeps the name, the score line and the HP bar exactly the size they
+		were before the band was added above them. ]]
+	local headRing = nil
+	local named = (not isSelf) or FX.TAG.SELF_SHOW_NAME
+	local showHead = named and driver ~= nil and FX.TAG.HEAD_HEIGHT > 0
+	local headShare = showHead and FX.TAG.HEAD_HEIGHT or 0
+	local rest = 1 - headShare
+	local nameShare = FX.TAG.NAME_HEIGHT * rest
+	local stripped = isSelf and not named
+
+	--[[ Tinted by the MODE where it has an opinion: a team-mate's name is their side's
+		colour and the juggernaut's is its own, because "red = rival" stops being a safe
+		read the moment the game has sides. Every other mode keeps the plain PAPER name.
+		The head's ring wears it too — at range the ring is the part still legible. ]]
+	local modeTint = driver and GameModes.colorFor(driver, player) or nil
+
 	local gui = Instance.new("BillboardGui")
 	gui.Name = FX.TAG.NAME
-	local guiW = isSelf and FX.TAG.SELF_WIDTH or FX.TAG.WIDTH
-	local guiH = isSelf and FX.TAG.SELF_HEIGHT or FX.TAG.HEIGHT
+	local guiW = stripped and FX.TAG.SELF_WIDTH or FX.TAG.WIDTH
+	local guiH = (stripped and FX.TAG.SELF_HEIGHT or FX.TAG.HEIGHT) / rest
 	-- Built at the popped-DOWN size; updateTag eases it up over POP_TIME.
 	gui.Size = UDim2.fromScale(guiW * FX.TAG.POP_SCALE, guiH * FX.TAG.POP_SCALE)
-	--[[ Height is measured from Hull.WeaponMount -- the pinned "top of the bodywork, on
-		the centreline" point CarFactory stamps on every car (ChassisSpec.mountOffset).
-		`adornee.Size.Y * 0.5` only ever meant anything while the adornee was the one
-		Shell block: on the trim part it used to pick it meant nothing at all, which is
-		why the tag sat 0.83 studs INSIDE the pickup and 1.57 above the blacksuv's roof.
-		OFFSET / SELF_OFFSET are therefore now studs above the ROOFLINE, and they are
-		the same distance on every car. ]]
+	--[[ Height is measured from Hull.BodyTop -- the pinned "highest point of the
+		bodywork, on the centreline" mark CarFactory stamps on every car
+		(ChassisSpec.topOffset). `adornee.Size.Y * 0.5` only ever meant anything while
+		the adornee was the one Shell block: on the trim part it used to pick it meant
+		nothing at all, which is why the tag sat 0.83 studs INSIDE the pickup and 1.57
+		above the blacksuv's roof. OFFSET / SELF_OFFSET are therefore studs above the
+		ROOFLINE, and they are the same distance on every car.
+
+		NOT Hull.WeaponMount, which is where a gun STANDS: that one seats on the pickup's
+		bed and slides onto the convertible's bonnet, and a tag hung off it drops inside
+		the car. It stays as the fallback for a car built before BodyTop existed. ]]
 	local hullRef = ChassisSpec.getHull(car)
+	local topMark = hullRef and hullRef:FindFirstChild(ChassisSpec.TOP_ATT)
 	local mount = hullRef and hullRef:FindFirstChild(ChassisSpec.MOUNT_ATT)
-	local roof = mount and mount.Position.Y or adornee.Size.Y * 0.5
+	local roof = (topMark and topMark.Position.Y) or (mount and mount.Position.Y) or adornee.Size.Y * 0.5
 	gui.StudsOffsetWorldSpace =
 		Vector3.new(0, roof + (isSelf and FX.TAG.SELF_OFFSET or FX.TAG.OFFSET), 0)
 	gui.AlwaysOnTop = true
@@ -3661,47 +3861,89 @@ local function buildTag(car: Model, adornee: BasePart, driver: Player?, isSelf: 
 	gui.Adornee = adornee
 	gui.Parent = adornee -- dies with the car, no cleanup race
 
+	if showHead then
+		--[[ Square by CONSTRAINT rather than by arithmetic: a BillboardGui's scale is
+			studs, so a hand-computed X share would go oval the moment WIDTH or
+			HEAD_HEIGHT moved. DominantAxis.Height derives the width from the band. ]]
+		local head = Instance.new("ImageLabel")
+		head.Name = "Head"
+		head.AnchorPoint = Vector2.new(0.5, 0)
+		head.Position = UDim2.fromScale(0.5, 0)
+		head.Size = UDim2.fromScale(1, headShare)
+		head.BackgroundColor3 = UI.INK
+		head.BackgroundTransparency = FX.TAG.HEAD_BACKING
+		head.BorderSizePixel = 0
+		head.ScaleType = Enum.ScaleType.Fit
+		head.Image = string.format(FX.TAG.HEAD_THUMB, driver.UserId)
+		head.Parent = gui
+
+		local ratio = Instance.new("UIAspectRatioConstraint")
+		ratio.AspectRatio = 1
+		ratio.DominantAxis = Enum.DominantAxis.Height
+		ratio.Parent = head
+
+		local round = Instance.new("UICorner")
+		round.CornerRadius = UDim.new(0.5, 0)
+		round.Parent = head
+
+		headRing = inkStroke(head, FX.TAG.STROKE)
+		if modeTint then
+			headRing.Color = modeTint
+		end
+	end
+
+	--[[ Every outline in the tag goes through here, so updateTag can size all of them
+		off one measurement rather than each caller remembering to. ]]
+	local strokes = {}
+	local function outline(target: Instance): Instance
+		local stroke = inkStroke(target, FX.TAG.STROKE)
+		table.insert(strokes, stroke)
+		return stroke
+	end
+	if headRing then
+		table.insert(strokes, headRing)
+	end
+
 	local name = Instance.new("TextLabel")
 	name.Name = "DriverName"
 	name.BackgroundTransparency = 1
-	name.Size = UDim2.fromScale(1, FX.TAG.NAME_HEIGHT)
-	name.Position = UDim2.fromScale(0, 0)
+	name.Size = UDim2.fromScale(1, nameShare)
+	name.Position = UDim2.fromScale(0, headShare)
 	name.Font = Enum.Font.GothamBlack
 	name.TextScaled = true
 	name.TextColor3 = UI.PAPER
-	name.Text = driver and driver.DisplayName or FX.TAG.FALLBACK_NAME
-	--[[ Tinted by the MODE where it has an opinion: a team-mate's name is their side's
-		colour and the juggernaut's is its own, because "red = rival" stops being a safe
-		read the moment the game has sides. Every other mode keeps the plain PAPER name. ]]
-	local modeTint = driver and GameModes.colorFor(driver) or nil
+	--[[ The @HANDLE, not the display name: it is the name that is unique, the one a
+		player can be looked up and added by, and it reads as a label rather than as a
+		word floating over a car. `driver.Name` IS the handle; the @ is ours. ]]
+	name.Text = driver and ("@" .. driver.Name) or FX.TAG.FALLBACK_NAME
 	if modeTint then
 		name.TextColor3 = modeTint
 	end
-	name.Visible = not isSelf
+	name.Visible = named
 	name.Parent = gui
-	inkStroke(name, FX.TAG.STROKE)
+	outline(name)
 
 	local crowns = Instance.new("TextLabel")
 	crowns.Name = "Crowns"
 	crowns.BackgroundTransparency = 1
-	crowns.Size = UDim2.fromScale(1, FX.TAG.CROWN_HEIGHT)
-	crowns.Position = UDim2.fromScale(0, FX.TAG.NAME_HEIGHT)
+	crowns.Size = UDim2.fromScale(1, FX.TAG.CROWN_HEIGHT * rest)
+	crowns.Position = UDim2.fromScale(0, headShare + nameShare)
 	crowns.Font = Enum.Font.GothamBlack
 	crowns.TextScaled = true
 	crowns.TextColor3 = UI.GOLD
 	crowns.Text = ""
 	crowns.Visible = false
 	crowns.Parent = gui
-	inkStroke(crowns, FX.TAG.STROKE)
+	outline(crowns)
 
 	local bar = Instance.new("Frame")
 	bar.Name = "HpBar"
-	--[[ With both labels gone a self tag has nothing to sit under, so its bar is centred
-		rather than pinned to the bottom of an otherwise empty billboard. ]]
-	bar.AnchorPoint = Vector2.new(0.5, isSelf and 0.5 or 1)
-	bar.Position = UDim2.fromScale(0.5, isSelf and 0.5 or 1)
-	local barW = isSelf and FX.TAG.SELF_BAR_WIDTH or FX.TAG.BAR_WIDTH
-	local barH = isSelf and FX.TAG.SELF_BAR_HEIGHT or FX.TAG.BAR_HEIGHT
+	--[[ A STRIPPED tag has no labels to sit under, so its bar is centred in an
+		otherwise empty billboard rather than pinned to the bottom of one. ]]
+	bar.AnchorPoint = Vector2.new(0.5, stripped and 0.5 or 1)
+	bar.Position = UDim2.fromScale(0.5, stripped and 0.5 or 1)
+	local barW = stripped and FX.TAG.SELF_BAR_WIDTH or FX.TAG.BAR_WIDTH
+	local barH = (stripped and FX.TAG.SELF_BAR_HEIGHT or FX.TAG.BAR_HEIGHT) * rest
 	bar.Size = UDim2.fromScale(barW, barH)
 	bar.BackgroundColor3 = UI.INK
 	bar.BorderSizePixel = 0
@@ -3709,7 +3951,14 @@ local function buildTag(car: Model, adornee: BasePart, driver: Player?, isSelf: 
 	local barCorner = Instance.new("UICorner")
 	barCorner.CornerRadius = UDim.new(0.5, 0)
 	barCorner.Parent = bar
-	local barStroke = inkStroke(bar, FX.TAG.STROKE)
+	local barStroke = outline(bar)
+	--[[ The empty track reads as a groove rather than a black stripe: shadow at the
+		top, opening up toward the bottom. Multiply only, like everything else here. ]]
+	local trackShade = Instance.new("UIGradient")
+	trackShade.Rotation = 90
+	local trackTop = FX.TAG.TRACK_TOP
+	trackShade.Color = ColorSequence.new(Color3.new(trackTop, trackTop, trackTop), Color3.new(1, 1, 1))
+	trackShade.Parent = bar
 
 	--[[ Damage ghost. It sits BEHIND the fill and is the same shape, so while the two
 		agree it is invisible with no visibility bookkeeping at all -- it only ever
@@ -3736,13 +3985,50 @@ local function buildTag(car: Model, adornee: BasePart, driver: Player?, isSelf: 
 	local fillCorner = Instance.new("UICorner")
 	fillCorner.CornerRadius = UDim.new(0.5, 0)
 	fillCorner.Parent = fill
+	--[[ Clips so the sheen below follows the pill's rounded ends instead of squaring
+		them off. Nothing else lives in the fill, so this costs one flag. ]]
+	fill.ClipsDescendants = true
+
 	--[[ A UIGradient MULTIPLIES the background, so the bar gains the house gloss while
-		hpColor still owns the hue on its own -- no second colour to keep in step. ]]
+		hpColor still owns the hue on its own -- no second colour to keep in step. The
+		stops are a tube profile rather than a straight ramp; see FX.TAG.GLOSS_TOP. ]]
+	local function grey(v: number): Color3
+		return Color3.new(v, v, v)
+	end
+	local T = FX.TAG
 	local fillGloss = Instance.new("UIGradient")
 	fillGloss.Rotation = 90
-	local low = FX.TAG.GLOSS_LOW
-	fillGloss.Color = ColorSequence.new(UI.PAPER, Color3.new(low, low, low))
+	fillGloss.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0.00, grey(T.GLOSS_TOP)),
+		ColorSequenceKeypoint.new(0.18, grey(T.GLOSS_KNEE)),
+		ColorSequenceKeypoint.new(0.50, grey(T.GLOSS_BODY)),
+		ColorSequenceKeypoint.new(0.78, grey(T.GLOSS_LIFT)),
+		ColorSequenceKeypoint.new(1.00, grey(T.GLOSS_LOW)),
+	})
 	fillGloss.Parent = fill
+
+	--[[ The highlight the multiply gradient cannot draw. ZIndex 4 puts it over the fill
+		(3) and under the chunk dividers (5), so it lights the bar without ever hiding
+		which chunk you are on. ]]
+	local sheen = Instance.new("Frame")
+	sheen.Name = "Sheen"
+	sheen.AnchorPoint = Vector2.new(0.5, 0)
+	sheen.Position = UDim2.fromScale(0.5, 0)
+	sheen.Size = UDim2.fromScale(1, T.SHEEN_HEIGHT)
+	sheen.BackgroundColor3 = UI.PAPER
+	sheen.BorderSizePixel = 0
+	sheen.ZIndex = 4
+	sheen.Parent = fill
+	local sheenCorner = Instance.new("UICorner")
+	sheenCorner.CornerRadius = UDim.new(0.5, 0)
+	sheenCorner.Parent = sheen
+	local sheenFade = Instance.new("UIGradient")
+	sheenFade.Rotation = 90
+	sheenFade.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, T.SHEEN_TOP),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	sheenFade.Parent = sheen
 
 	local entry = {
 		gui = gui,
@@ -3754,6 +4040,8 @@ local function buildTag(car: Model, adornee: BasePart, driver: Player?, isSelf: 
 		fill = fill,
 		ghost = ghost,
 		stroke = barStroke,
+		strokes = strokes,
+		strokePx = -1,
 		chunks = {},
 		chunkMax = -1,
 		conns = {},
@@ -3783,6 +4071,10 @@ local function buildTag(car: Model, adornee: BasePart, driver: Player?, isSelf: 
 	end))
 	if driver then
 		table.insert(entry.conns, driver:GetAttributeChangedSignal(ATTR.SCORE):Connect(function()
+			refreshScore(entry)
+		end))
+		-- Bounty mode: the same line, driven by the price instead of the standings.
+		table.insert(entry.conns, driver:GetAttributeChangedSignal(ATTR.BOUNTY):Connect(function()
 			refreshScore(entry)
 		end))
 	end
@@ -3835,7 +4127,7 @@ local function bindHighlight(car: Model, owner: number?)
 		answer — teams being dealt at the round start, the crown changing hands mid-round
 		— rebuilds the car, and the new model arrives back here for a fresh highlight. ]]
 	local driver = type(owner) == "number" and Players:GetPlayerByUserId(owner) or nil
-	local modeColor = driver and GameModes.colorFor(driver) or nil
+	local modeColor = driver and GameModes.colorFor(driver, player) or nil
 
 	local hl = Instance.new("Highlight")
 	hl.Name = FX.HL.NAME
@@ -3851,7 +4143,10 @@ local function bindHighlight(car: Model, owner: number?)
 	--[[ The ENTRY is what lives in this table, not the Highlight: the hit flash drives
 		colour and fill transparency away from these two base values every time this car
 		is damaged, and needs somewhere to remember what to put back. ]]
-	highlights[car] = { hl = hl, color = color, strength = 0 }
+	--[[ `driver` is kept for BOUNTY alone: it is the one mode whose answer changes
+		WITHOUT the car being rebuilt (a contract is re-rolled mid-round), so
+		refreshModeColors has to be able to ask this question again. ]]
+	highlights[car] = { hl = hl, color = color, strength = 0, driver = driver, mine = mine }
 	highlightCount += 1
 end
 
@@ -3863,6 +4158,37 @@ local function dropHighlight(car: Instance)
 	highlights[car] = nil
 	highlightCount = math.max(0, highlightCount - 1)
 	entry.hl:Destroy()
+end
+
+--[=[ Re-asks the MODE what colour every live car should be wearing, on the two events
+	that can change the answer without rebuilding a single car: your bounty contract
+	being re-rolled, and the mode itself changing under a car that outlived the phase.
+
+	Everything else -- teams being dealt, the juggernaut crown moving -- rebuilds the
+	car and arrives back through bindHighlight with a fresh answer, which is why this
+	did not need to exist until Bounty. It walks two small tables and writes only when
+	the colour actually differs, so a re-roll costs nothing measurable.
+
+	The highlight's BASE colour is what changes: the hit flash drives colour and fill
+	away from entry.color every time a car is damaged and restores from it afterwards,
+	so writing the Highlight alone would be reverted by the next hit. ]=]
+local function refreshModeColors()
+	for _, entry in pairs(tags) do
+		if entry.player then
+			entry.name.TextColor3 = GameModes.colorFor(entry.player, player) or UI.PAPER
+		end
+		refreshScore(entry)
+	end
+
+	for _, entry in pairs(highlights) do
+		local wanted = entry.driver and GameModes.colorFor(entry.driver, player)
+			or (entry.mine and FX.HL.SELF_COLOR or FX.HL.RIVAL_COLOR)
+		if wanted ~= entry.color then
+			entry.color = wanted
+			entry.hl.FillColor = wanted
+			entry.hl.OutlineColor = wanted
+		end
+	end
 end
 
 --[[ Cars arrive from CarFactory possibly before their Hull/attributes replicate, so
@@ -4002,6 +4328,12 @@ function FxController.init(ctx)
 			end
 		end
 	end)
+
+	--[[ BOUNTY: your mark is red and every other car is white, and the mark changes
+		mid-round without anything being rebuilt -- so the one thing that can tell the
+		field its colours changed is your own contract attribute. ]]
+	player:GetAttributeChangedSignal(ATTR.BOUNTY_TARGET):Connect(refreshModeColors)
+	GameModes.onModeChanged(refreshModeColors)
 
 	-- ONE frame loop for the whole juice layer. pcall keeps a bad frame from
 	-- spamming output or stranding fx parts mid-fade.

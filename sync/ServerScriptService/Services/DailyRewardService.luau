@@ -41,7 +41,7 @@
 			         substituted, so a card can never promise something the grant path
 			         would not actually deliver.
 
-	GRANTS run through ProfileService only (addCoins / addGems / grantCar / owns). This
+	GRANTS run through ProfileService only (addMoney / addGems / grantCar / owns). This
 	service writes no attribute and owns none — all of its state rides the remote.
 
 	SUBSTITUTION (why `rewards` is per player instead of read straight from the track)
@@ -49,7 +49,7 @@
 		  this loop and every loop after — so week two is honest rather than empty.
 		* Spins are banked by MonetizationService, which has no public mutator for them yet
 		  (HANDOFF: MonetizationService.addSpins). Until it lands, a spins day pays its
-		  documented coin equivalent rather than stalling the whole track on one bad day.
+		  documented money equivalent rather than stalling the whole track on one bad day.
 
 	PERSISTENCE — profile.dailyStreak + profile.lastDailyDay.
 		ProfileService does not carry them through serialize() yet (HANDOFF has the lines).
@@ -89,18 +89,18 @@ local SWEEP_SECONDS = 60 -- re-push so `ready` flips at midnight mid-session, no
 --[[ Config has NO DAILY section yet (HANDOFF has the paste-ready block), so these are the
 	tunables for now. Config.DAILY wins the moment it exists, key by key, with no code
 	change here — which is also what stops a half-filled Config.DAILY from breaking the
-	track. Amounts are sized against Config.ECONOMY: a round pays roughly 200-600 coins, so
+	track. Amounts are sized against Config.ECONOMY: a round pays roughly 200-600 money, so
 	a day is worth about half a round up to two, and the whole week is worth less than the
 	cheapest mid-tier car. Meaningful to collect, never needed to compete. ]]
 local DEFAULTS = {
 	MISS_GRACE_DAYS = 1,
-	SPIN_COINS = 400, -- what one banked spin pays while the spins seam is missing
+	SPIN_MONEY = 400, -- what one banked spin pays while the spins seam is missing
 	CAR_OWNED_GEMS = 20, -- day 7 when that car is already in the garage
 	REWARDS = {
-		{ day = 1, kind = "coins", amount = 250, label = "+250 Coins" },
-		{ day = 2, kind = "coins", amount = 500, label = "+500 Coins" },
+		{ day = 1, kind = "money", amount = 250, label = "+250 Money" },
+		{ day = 2, kind = "money", amount = 500, label = "+500 Money" },
 		{ day = 3, kind = "gems", amount = 5, label = "+5 Gems" },
-		{ day = 4, kind = "coins", amount = 1000, label = "+1,000 Coins" },
+		{ day = 4, kind = "money", amount = 1000, label = "+1,000 Money" },
 		{ day = 5, kind = "spins", amount = 3, label = "+3 Spins" },
 		{ day = 6, kind = "gems", amount = 15, label = "+15 Gems" },
 		{ day = 7, kind = "car", carId = "police", label = "Police Car" },
@@ -120,7 +120,7 @@ end
 local REWARDS = tuned("REWARDS")
 local DAYS = #REWARDS
 local MISS_GRACE_DAYS = tuned("MISS_GRACE_DAYS")
-local SPIN_COINS = tuned("SPIN_COINS")
+local SPIN_MONEY = tuned("SPIN_MONEY")
 local CAR_OWNED_GEMS = tuned("CAR_OWNED_GEMS")
 
 local serverCtx = nil
@@ -255,8 +255,8 @@ local function ownsCar(player: Instance, carId: string): boolean
 	return ok and owned == true
 end
 
-local function coinsReward(day: number, amount: number)
-	return { day = day, kind = "coins", amount = amount, label = "+" .. MathUtil.comma(amount) .. " Coins" }
+local function moneyReward(day: number, amount: number)
+	return { day = day, kind = "money", amount = amount, label = "+" .. MathUtil.comma(amount) .. " Money" }
 end
 
 --[[ What day `day` would ACTUALLY pay THIS player right now. The client is sent this rather
@@ -279,10 +279,10 @@ local function effectiveReward(player: Instance, day: number)
 			warn(
 				"DailyRewardService: MonetizationService.addSpins is missing — day "
 					.. day
-					.. " pays coins instead of spins (see DailyRewardService HANDOFF)"
+					.. " pays money instead of spins (see DailyRewardService HANDOFF)"
 			)
 		end
-		return coinsReward(day, math.max(1, math.floor((tonumber(base.amount) or 0) * SPIN_COINS)))
+		return moneyReward(day, math.max(1, math.floor((tonumber(base.amount) or 0) * SPIN_MONEY)))
 	end
 
 	return { day = day, kind = base.kind, amount = base.amount, carId = base.carId, label = base.label }
@@ -294,8 +294,8 @@ DailyRewardService._effectiveReward = effectiveReward
 	entry here and one line in the track. A handler returns TRUE only when the grant is
 	CONFIRMED; anything else refuses the claim and commits nothing. ]]
 local GRANTS = {
-	coins = function(player: Instance, reward): boolean
-		local ok, balance = profileCall("addCoins", player, reward.amount)
+	money = function(player: Instance, reward): boolean
+		local ok, balance = profileCall("addMoney", player, reward.amount)
 		return ok and type(balance) == "number"
 	end,
 

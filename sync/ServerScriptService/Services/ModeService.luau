@@ -29,8 +29,10 @@
 		        out loud: everything else it does is visible in the world already.
 
 	SERVICES USED — resolved LAZILY through ctx.svc at call time, never captured at init:
-		SpawnService  isAlive getLives spawnCar despawnCar
-		ScoreService  addPoints
+		SpawnService   isAlive getLives spawnCar despawnCar
+		ScoreService   addPoints
+		BountyService  onKill   (bounty mode only: it owns that mode's whole payout,
+		                         because there the victim's PRICE is the payment)
 
 	INIT ORDER
 		Before SpawnService (which asks for lives the moment a player joins) and before
@@ -403,6 +405,16 @@ function ModeService.onKill(killer, victim)
 	local def = GameModes.current()
 	local tookTheMonster = GameModes.hasJuggernaut(def) and juggernaut ~= nil and juggernaut == victim
 	local credited = isPlayer(killer) and killer ~= victim
+
+	--[[ BOUNTY is the one mode that does not pay a flat rate for a kill: the victim's
+		own price is the payment, and BountyService owns it end to end (it also tells
+		everybody who was hunting them to re-roll). Paying KILL_POINTS beside it would
+		quietly make the price cosmetic. Bounty has no juggernaut, so there is nothing
+		below this line for an early return to miss. ]]
+	if GameModes.hasBounty(def) then
+		call("BountyService", "onKill", killer, victim)
+		return
+	end
 
 	if credited then
 		call("ScoreService", "addPoints", killer, tookTheMonster and CFG.JUGG_KILL_POINTS or CFG.KILL_POINTS)

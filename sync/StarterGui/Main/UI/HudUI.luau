@@ -807,7 +807,9 @@ function HudUI.init(ctx)
 					board, the car and the tag all agree on who is a team-mate and which
 					one is the monster. nil in the four modes with no sides. ]]
 				local rowPlayer = Players:GetPlayerByUserId(tonumber(entry.userId) or 0)
-				local rowTint = rowPlayer and GameModes.colorFor(rowPlayer) or nil
+				-- `player` is the viewer: in Bounty the one row painted red is the car
+				-- YOU are contracted to wreck, exactly as on its nametag.
+				local rowTint = rowPlayer and GameModes.colorFor(rowPlayer, player) or nil
 				rec.name.TextColor3 = rowTint or kit.PAPER
 
 				local isLocal = entry.userId == player.UserId

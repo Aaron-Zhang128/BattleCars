@@ -228,6 +228,21 @@ local function beginRoll(hunter)
 		return
 	end
 
+	--[[ A reel that can only land on one name is theatre, and on a two-car server it is
+		theatre that plays every few seconds -- a 2.8 second card between you and the
+		road, telling you the thing you already knew. With a single candidate the
+		contract is handed over silently and the client just flashes the chip. ]]
+	if #pool < 2 then
+		lostAt[hunter] = nil
+		setTarget(hunter, winner.UserId)
+		fire(hunter, "assign", {
+			targetId = winner.UserId,
+			targetName = winner.DisplayName,
+			targetBounty = GameModes.bountyOf(winner),
+		})
+		return
+	end
+
 	pendingRoll[hunter] = winner
 	lostAt[hunter] = nil
 	setTarget(hunter, 0)

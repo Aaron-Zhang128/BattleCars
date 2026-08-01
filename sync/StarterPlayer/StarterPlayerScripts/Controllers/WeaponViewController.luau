@@ -207,8 +207,10 @@ local function printTable()
 		local model = carDef.model and models:FindFirstChild(carDef.model)
 		if model then
 			local offset = ChassisSpec.mountOffset(model)
-			table.insert(lines, string.format("   %-12s %-11s  mount = (0, %.2f, 0)",
-				carDef.id, carDef.model, offset.Y))
+			-- Z is non-zero on a car whose mount had to SLIDE to find a roof to stand on.
+			table.insert(lines, string.format("   %-12s %-11s  mount = (%.2f, %.2f, %.2f)%s",
+				carDef.id, carDef.model, offset.X, offset.Y, offset.Z,
+				(math.abs(offset.X) > 0.01 or math.abs(offset.Z) > 0.01) and "   <- slid off centre" or ""))
 		else
 			table.insert(lines, string.format("   %-12s model '%s' MISSING", carDef.id, tostring(carDef.model)))
 		end

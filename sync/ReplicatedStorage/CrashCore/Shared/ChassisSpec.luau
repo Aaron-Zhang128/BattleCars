@@ -8,9 +8,14 @@
 		Model                          name = "Car_<userId>", tagged ChassisSpec.CAR_TAG
 		  PrimaryPart = Hull           Part, the ONLY collidable body
 		  Hull.RootAtt                 Attachment at hull center
-		  Hull.WeaponMount             Attachment on the centreline, just clear of the
-		                               highest bodywork, LookVector = the way the car
-		                               drives. THE place to bolt a weapon or a cosmetic.
+		  Hull.WeaponMount             Attachment sitting ON the patch of roof a weapon
+		                               base covers (see mountOffset -- it is NOT always
+		                               the centre, and NOT the tallest point), LookVector
+		                               = the way the car drives. THE place to bolt a
+		                               weapon or a cosmetic.
+		  Hull.BodyTop                 Attachment on the centreline at the highest point
+		                               of the bodywork. What a NAMETAG clears; never
+		                               where anything stands.
 		  Hull.Drive                    LinearVelocity  (RelativeTo = Attachment0/World per spec)
 		  Hull.Steer                    AlignOrientation (OneAttachment mode)
 		  Wheels/                       Folder of non-collidable cosmetic wheels
@@ -40,6 +45,7 @@ ChassisSpec.DRIVE = "Drive"
 ChassisSpec.STEER = "Steer"
 ChassisSpec.ROOT_ATT = "RootAtt"
 ChassisSpec.MOUNT_ATT = "WeaponMount" -- roof mount point; see the contract above
+ChassisSpec.TOP_ATT = "BodyTop" -- highest point of the bodywork; what a nametag clears
 --[[ Gap between the highest bodywork and the mount. Deliberately tiny: a mount that
 	visibly floats reads as a bug, and anything bolting on can offset UP from a mount
 	that hugs the roof but cannot recover one that started too high. ]]
@@ -84,6 +90,49 @@ ChassisSpec.ATTR = {
 	SPEED_SCALE = "SpeedScale", -- top speed AND acceleration
 }
 
+--[[ Half the widest weapon base in the game (RAILGUN, 6.80 studs across), so the disc
+	mountOffset samples is exactly the patch of roof a rig physically stands on. Widen it
+	and the pickup climbs back onto its cab. ]]
+ChassisSpec.MOUNT_FOOTPRINT = 3.4
+
+--[=[ SEATING THE MOUNT. These four dials are the whole "a weapon must not float"
+	rule, and they exist because a car roof is not a table: it is domed, it carries
+	rails and aerials, and on one of the ten cars there is no roof at all.
+
+	COVERAGE  the fraction of the base's footprint that must be SOLID at the height
+	          the mount picks. Reading the highest thing in the footprint instead --
+	          which is what this used to do -- hands the whole rig to a roof rail:
+	          the black SUV's rails stand 0.70 above its roof, so every weapon on it
+	          hovered that far off the paint. At 0.60 the rails become the minority
+	          they are, the base sits on the ROOF, and the rails poke harmlessly into
+	          its skirt.
+	SEAT_TOL  how far under the chosen height still counts as touching, i.e. how much
+	          dome a base is allowed to bridge.
+	POKE_TOL  how far a rail/aerial may stand PROUD of it before that spot counts as
+	          spearing the rig rather than supporting it. Keep it under a base's own
+	          thickness (~1.5 studs) or a windscreen can come through the turret.
+	SEAT_OK   a footprint this solid is accepted where it stands, so nine of the ten
+	          cars never enter the slide search below and land on exactly the height
+	          they had before this rule existed. ]=]
+ChassisSpec.MOUNT_COVERAGE = 0.60
+ChassisSpec.MOUNT_SEAT_TOL = 0.60
+ChassisSpec.MOUNT_POKE_TOL = 0.80
+ChassisSpec.MOUNT_SEAT_OK = 0.85
+
+--[[ How far, and in what steps, the mount may travel ALONG THE CAR to find something
+	to stand on when dead centre is mostly air. It is the convertible that needs this:
+	its centre is the open cockpit, so a centred mount leaves the gun hovering over the
+	seats with only the windscreen holding it up. Sliding finds the bonnet 6.5 studs
+	forward, where the base is 100% supported. Nine cars never slide at all. ]]
+ChassisSpec.MOUNT_SLIDE_MAX = 7
+ChassisSpec.MOUNT_SLIDE_STEP = 0.5
+
+--[[ The yaw CarFactory turns a raw source model by on assembly (its models are authored
+	nose-backwards). It lives here rather than in CarFactory because mountOffset now
+	returns a point that is OFF the centreline, and that point has to be turned by the
+	same angle as the bodywork or the mount lands on the wrong end of the car. ]]
+ChassisSpec.MODEL_FACING_YAW_DEG = 180
+
 -- ---------- car-model geometry ----------
 --[[ World-axis-aligned bounds over every part's OWN oriented box, NOT model:GetExtents
 	or GetBoundingBox: the shipped models carry a 90-deg-yawed, off-centre pivot that
@@ -108,21 +157,177 @@ function ChassisSpec.measureExtents(model: Model): (Vector3?, Vector3?)
 	return low, high
 end
 
---[[ Where Hull.WeaponMount sits, in hull space, for a RAW source model.
+--[=[ Where Hull.WeaponMount sits, in hull space, for a RAW source model.
 
-	CarFactory re-centres the bodywork's measured bounds on the hull's centre, so the
-	top of the bodywork is exactly half the MODEL's height above that centre. That is
-	NOT hullSize.Y * 0.5 — car.hull is deliberately 2 x GROUND_CLEARANCE shorter than
-	the body, so measuring off the hull would bury the mount inside the roof.
+	CarFactory re-centres the bodywork's measured bounds on the hull's centre, so a
+	height here is measured from that AABB CENTRE. It is NOT hullSize.Y * 0.5 —
+	car.hull is deliberately 2 x GROUND_CLEARANCE shorter than the body, so measuring
+	off the hull would bury the mount inside the roof.
 
-	X and Z are zero on purpose: dead centre of the roofline is the one spot that reads
-	as deliberate on all ten silhouettes, and it stays put when the car rolls. ]]
+	IT SEATS THE RIG ON THE ROOF IT ACTUALLY STANDS ON. Not the tallest point anywhere
+	on the car (that is the whole-model rule this started as, and it left every weapon
+	on the pickup hanging over the tray), and not the tallest point in the footprint
+	either (that is the rule after it, and it handed the black SUV's rig to a roof rail
+	and hung it 1.00 stud off the paint). What it does instead is sample the disc the
+	base physically covers and take the height at which MOUNT_COVERAGE of that disc is
+	SOLID — the roof plane, with rails and aerials outvoted.
+
+	AND IT MAY SLIDE ALONG THE CAR. A convertible has no roof at all: dead centre is
+	the open cockpit, and the only thing up there to hold a gun is the windscreen. So
+	when the footprint where it stands is mostly air, the mount walks the car's long
+	axis in MOUNT_SLIDE_STEP steps and takes the most solid seat it can find — the
+	bonnet, 6.5 studs forward, on the convertible. Nine of the ten cars pass the
+	MOUNT_SEAT_OK test where they stand and never move a millimetre.
+
+	The offset comes back YAWED BY MODEL_FACING_YAW, because it is no longer on the
+	centre of the car: the slide is measured on the raw model and the bodywork is
+	turned by that angle on assembly, so the mount has to turn with it or it lands on
+	the wrong end. Height is unaffected either way.
+
+	The whole-model top is kept as the FALLBACK for a model with nothing under it at
+	all, and it is the value that can never clip.
+
+	MEMOISED. Sampling a disc 113 ways costs ~2 ms on a car that stands where it is and
+	~10 ms on one that has to go looking for a seat, and CarFactory calls this on EVERY
+	spawn — twelve at once at the start of a round. The answer depends only on the model
+	and the size it was scaled to, so it is worked out once per (model, size). ]=]
+local mountMemo = {}
+
 function ChassisSpec.mountOffset(model: Model): Vector3
 	local low, high = ChassisSpec.measureExtents(model)
 	if not low or not high then
 		return Vector3.new(0, ChassisSpec.MOUNT_CLEARANCE, 0)
 	end
-	return Vector3.new(0, (high.Y - low.Y) * 0.5 + ChassisSpec.MOUNT_CLEARANCE, 0)
+
+	local size = high - low
+	local memoKey = string.format("%s|%.3f|%.3f|%.3f", model.Name, size.X, size.Y, size.Z)
+	local cached = mountMemo[memoKey]
+	if cached then
+		return cached
+	end
+
+	local centre = (low + high) * 0.5
+	local reach = ChassisSpec.MOUNT_FOOTPRINT
+	local slideMax = ChassisSpec.MOUNT_SLIDE_MAX
+
+	--[[ Which horizontal axis is the car's LENGTH. A raw model may be authored across
+		either one, so this is measured rather than assumed: sliding a mount sideways
+		off a car would be a far worse bug than the float it is fixing. ]]
+	local alongX = (high.X - low.X) >= (high.Z - low.Z)
+
+	--[[ Every part flattened to a world-axis box, once, and only the ones that can
+		reach the sampled disc anywhere along its travel. Everything below reads this
+		list, so the slide search costs no extra geometry passes. ]]
+	local boxes = {}
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BasePart") then
+			local cf, half = d.CFrame, d.Size * 0.5
+			local extent = Vector3.new(
+				math.abs(cf.RightVector.X) * half.X + math.abs(cf.UpVector.X) * half.Y + math.abs(cf.LookVector.X) * half.Z,
+				math.abs(cf.RightVector.Y) * half.X + math.abs(cf.UpVector.Y) * half.Y + math.abs(cf.LookVector.Y) * half.Z,
+				math.abs(cf.RightVector.Z) * half.X + math.abs(cf.UpVector.Z) * half.Y + math.abs(cf.LookVector.Z) * half.Z
+			)
+			local xReach = alongX and (reach + slideMax) or reach
+			local zReach = alongX and reach or (reach + slideMax)
+			if math.abs(cf.Position.X - centre.X) - extent.X <= xReach
+				and math.abs(cf.Position.Z - centre.Z) - extent.Z <= zReach
+			then
+				table.insert(boxes, { cf.Position - extent, cf.Position + extent })
+			end
+		end
+	end
+
+	--[[ The surface height under each of 113 points on the base's own footprint, at a
+		mount slid `along` studs down the car. A point with nothing under it is AIR and
+		sorts to the bottom, which is exactly how an open cockpit loses the vote. ]]
+	local SAMPLES = 11
+	local function profile(along: number)
+		local tops = {}
+		for i = 0, SAMPLES - 1 do
+			for j = 0, SAMPLES - 1 do
+				local u = -reach + 2 * reach * i / (SAMPLES - 1)
+				local v = -reach + 2 * reach * j / (SAMPLES - 1)
+				if u * u + v * v <= reach * reach then
+					local x = centre.X + (alongX and (along + u) or v)
+					local z = centre.Z + (alongX and v or (along + u))
+					local top = nil
+					for _, b in ipairs(boxes) do
+						if x >= b[1].X and x <= b[2].X and z >= b[1].Z and z <= b[2].Z then
+							top = top and math.max(top, b[2].Y) or b[2].Y
+						end
+					end
+					table.insert(tops, top or -math.huge)
+				end
+			end
+		end
+		table.sort(tops, function(a, b)
+			return a > b
+		end)
+		return tops
+	end
+
+	--[[ Reads one profile: the height COVERAGE of the disc reaches, and how much of the
+		disc that height actually seats (touching it, or standing no more proud of it
+		than a rail is allowed to). That fraction is the score the slide search maximises. ]]
+	local function seatOf(tops)
+		local index = math.clamp(math.ceil(#tops * ChassisSpec.MOUNT_COVERAGE), 1, #tops)
+		local level = tops[index]
+		if level == -math.huge then
+			return nil, 0
+		end
+		local seated = 0
+		for _, top in ipairs(tops) do
+			if top >= level - ChassisSpec.MOUNT_SEAT_TOL and top <= level + ChassisSpec.MOUNT_POKE_TOL then
+				seated += 1
+			end
+		end
+		return level, seated / math.max(#tops, 1)
+	end
+
+	local bestAlong = 0
+	local bestLevel, bestSeat = seatOf(profile(0))
+
+	--[[ Only a car that is genuinely standing on air pays for this. Nearest seat wins
+		ties, so a mount never wanders further down the bonnet than it has to. ]]
+	if not bestLevel or bestSeat < ChassisSpec.MOUNT_SEAT_OK then
+		local step = math.max(ChassisSpec.MOUNT_SLIDE_STEP, 0.1)
+		for k = 1, math.floor(slideMax / step) do
+			for _, along in ipairs({ k * step, -k * step }) do
+				local level, seat = seatOf(profile(along))
+				if level and (not bestLevel or seat > bestSeat + 1e-6) then
+					bestLevel, bestSeat, bestAlong = level, seat, along
+				end
+			end
+		end
+	end
+
+	local topAboveCentre = bestLevel and (bestLevel - centre.Y) or (high.Y - low.Y) * 0.5
+	local offset = Vector3.new(
+		alongX and bestAlong or 0,
+		topAboveCentre + ChassisSpec.MOUNT_CLEARANCE,
+		alongX and 0 or bestAlong
+	)
+	-- ...turned onto the assembled car, exactly as CarFactory turns the bodywork.
+	local mount = CFrame.Angles(0, math.rad(ChassisSpec.MODEL_FACING_YAW_DEG), 0) * offset
+	mountMemo[memoKey] = mount
+	return mount
+end
+
+--[=[ The TOP OF THE SILHOUETTE, on the centreline — the highest point of the bodywork
+	anywhere on the car, measured from the same AABB centre mountOffset measures from.
+
+	It exists because the mount stopped being that point. A weapon has to stand on
+	something, so the mount seats on the roof the base covers and slides off centre when
+	there is none; a NAMETAG has to clear the whole car, so it wants the tallest thing on
+	it. Reading one off the other is what put the tag over the pickup's bed rather than
+	over its cab, and what would have dropped the convertible's tag onto the bonnet with
+	its gun. Two different questions, two marks. ]=]
+function ChassisSpec.topOffset(model: Model): Vector3
+	local low, high = ChassisSpec.measureExtents(model)
+	if not low or not high then
+		return Vector3.new(0, ChassisSpec.MOUNT_CLEARANCE, 0)
+	end
+	return Vector3.new(0, (high.Y - low.Y) * 0.5, 0)
 end
 
 -- ---------- body modifiers ----------

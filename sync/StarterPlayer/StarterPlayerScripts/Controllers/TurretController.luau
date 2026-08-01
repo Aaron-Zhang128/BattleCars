@@ -20,10 +20,15 @@
 		is invisible in practice because the server clamps aim into a narrow cone anyway.
 
 	AIM
+		While Config.WEAPONS.AIM_MAX_YAW_DEG is 0 — which is the shipped value — there
+		is no aim at all: every turret sits on its own car's heading, because that is
+		where every shot goes. The two branches below are what a non-zero cone brings
+		back, and they are left intact for it.
+
 		LOCAL car   CameraController.getAimDirection() every frame — exactly what the
 		            shot will use, so the barrel is never pointing somewhere you did
 		            not shoot.
-		REMOTE car  ChassisSpec.ATTR.AIM_DIR — the flat aim WeaponService publishes on
+	REMOTE car  ChassisSpec.ATTR.AIM_DIR — the flat aim WeaponService publishes on
 		            every accepted shot. The hold weapons fire 11-12x a second, so a
 		            remote turret tracks properly through sustained fire and then HOLDS
 		            the angle it last fired at. Before that car's first shot the
@@ -155,6 +160,12 @@ end
 -- ==========================================================================
 -- § 4) mount / unmount
 -- ==========================================================================
+--[[ Rigs that are shrinking away. A dismounting weapon has to keep being POSED while
+	it collapses -- the car is usually still driving at 190 studs/s -- so it leaves
+	`rigs` (freeing its slot for the next weapon immediately) and lives here until
+	WeaponRig.step says it is done. ]]
+local dying = {}
+
 local function dropRig(car: Model)
 	local rig = rigs[car]
 	if not rig then
@@ -162,7 +173,16 @@ local function dropRig(car: Model)
 	end
 	rigs[car] = nil
 	rigCount = math.max(0, rigCount - 1)
-	WeaponRig.destroy(rig)
+
+	--[[ Nothing to animate if the car (and with it the rig's folder) has already gone,
+		and nothing to animate if we are at the ceiling either -- a runaway spawn must
+		not be able to keep a queue of corpses posing. ]]
+	if not car.Parent or not (rig.folder and rig.folder.Parent) or #dying >= RIG.MAX_RIGS then
+		WeaponRig.destroy(rig)
+		return
+	end
+	WeaponRig.beginRemove(rig)
+	table.insert(dying, rig)
 end
 
 --[[ Rebuilds the car's weapon to match its driver's slot. Cheap and idempotent: it
@@ -348,6 +368,14 @@ function TurretController.getMuzzleWorld(): Vector3?
 end
 
 local function aimFor(car: Model, rig, now: number): Vector3?
+	--[[ With the firing cone pinned to zero there is nothing to aim: every weapon in
+		the game fires along its own car's heading, so every turret rests along it.
+		Returning nil says exactly that — WeaponRig.setAim reads it as "no aim, sit on
+		the nose" — and it keeps the camera out of a pose it can no longer influence.
+		Raise Config.WEAPONS.AIM_MAX_YAW_DEG and the two branches below come back. ]]
+	if Config.WEAPONS.AIM_MAX_YAW_DEG <= 0 then
+		return nil
+	end
 	if car == localCar() then
 		local aim = safeCall("CameraController", "getAimDirection", nil)
 		if typeof(aim) == "Vector3" and aim.Magnitude > 1e-3 then
@@ -377,7 +405,7 @@ end
 	the key `pairs` is currently on is defined behaviour in Lua, so dropping a dead
 	rig mid-loop is safe and avoids a second pass. ]]
 local function step(dt: number)
-	if rigCount == 0 then
+	if rigCount == 0 and #dying == 0 then
 		return
 	end
 	local now = os.clock()
@@ -389,6 +417,19 @@ local function step(dt: number)
 			if not WeaponRig.step(rig, dt, now) then
 				dropRig(car)
 			end
+		end
+	end
+
+	--[[ The shrink-away pass. These are no longer aimed -- a weapon that is leaving
+		should collapse where it stands, not keep tracking -- but they are still posed
+		every frame, so one that is dismounting mid-corner stays glued to the roof.
+		Backwards, so a finished rig can be swap-removed without disturbing the walk. ]]
+	for index = #dying, 1, -1 do
+		local rig = dying[index]
+		if not WeaponRig.step(rig, dt, now) then
+			WeaponRig.destroy(rig)
+			dying[index] = dying[#dying]
+			dying[#dying] = nil
 		end
 	end
 end

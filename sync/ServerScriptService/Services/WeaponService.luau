@@ -88,6 +88,13 @@ local MUZZLE_CLEARANCE = 1.5 -- extra studs so a projectile never spawns inside 
 local GROUND_PROBE_UP = 12 -- mine placement: start the down-cast this far above
 local GROUND_PROBE_DOWN = 48
 local MINE_HEIGHT = 0.8
+--[[ How far off a surface a bounced ball is placed. Landing exactly ON the face makes
+	the next cast start inside it, which presents as the ball sticking to the floor. ]]
+local BOUNCE_CLEARANCE = 0.35
+local BOUNCE_FX_RADIUS = 3 -- a scuff where it skips, not a blast: nothing is damaged here
+-- What a flak ball is allowed to swat. Both maintain `pos` every step; a mine does not
+-- fly and a "ball" kind is engine-simulated, so neither is a valid intercept target.
+local INTERCEPTABLE = { projectile = true, lob = true }
 local MINE_DISC_SCALE = 1.0 -- disc diameter = triggerRadius, i.e. it reads as half the real trigger
 
 -- ==========================================================================
@@ -180,24 +187,35 @@ local function isFiniteNumber(n: number): boolean
 	return n == n and n ~= math.huge and n ~= -math.huge
 end
 
---[[ Turns the client's aim hint into a server-approved unit direction.
+--[[ The direction a shot travels. It is NOT the client's to choose.
 
-	NaN / zero / absurd vectors are REPLACED by the car's own forward (a bad packet
-	costs you accuracy, never a crash). Yaw is clamped into CFG.AIM_MAX_YAW_DEG on the
-	driving plane exactly as before, so nobody shoots sideways or backwards out of a
-	forward-facing weapon.
+	EVERY weapon in this game fires along the car's own heading — the way the
+	windshield is facing — and while Config.WEAPONS.AIM_MAX_YAW_DEG is 0 the aim hint
+	the client sends is not consulted at all. Steering IS aiming. That is the design
+	rule, not a limitation: with no cursor in the loop there is nothing to desync and
+	nothing to forge, and the direction the bonnet points is exactly where the shot
+	goes, on every machine watching.
 
-	The PITCH is now KEPT (clamped to CFG.AIM_MAX_PITCH_DEG). It has to be: shots leave
-	the turret barrel, which sits about 8 studs above hull centre, and a flat shot from
-	up there passes clean over every other car's roof. The client aims barrel -> target
-	point, and that downward angle is the whole reason the shot connects. ]]
+	It is FLAT — the driving plane, not the hull's literal LookVector. A hover chassis
+	pitches a few degrees over every bump and under every brake, and that wobble is
+	suspension, not intent; ride it and a pothole puts your shots in the dirt.
+
+	Which is also why a shot does not START at the barrel — see shotOrigin. A flat shot
+	from a muzzle eight studs up sails clean over every roof in the arena, so flattening
+	the aim and dropping the origin are ONE change. Never do one without the other.
+
+	Raise AIM_MAX_YAW_DEG above 0 and the old behaviour returns: the hint is clamped
+	into that cone and its pitch is honoured up to AIM_MAX_PITCH_DEG. ]]
 local function sanitizeAim(aimDir: any, hull: BasePart): Vector3
 	local forward = MathUtil.flatUnit(hull.CFrame.LookVector)
 	if forward == Vector3.zero then
 		forward = Vector3.new(0, 0, -1) -- hull pointing straight up: pick something sane
 	end
+	if CFG.AIM_MAX_YAW_DEG <= 0 then
+		return forward -- strictly ahead: the client's hint is not read at all
+	end
 
-	if typeof(aimDir) ~= "Vector3" then
+		if typeof(aimDir) ~= "Vector3" then
 		return forward
 	end
 	if not (isFiniteNumber(aimDir.X) and isFiniteNumber(aimDir.Y) and isFiniteNumber(aimDir.Z)) then
@@ -235,9 +253,9 @@ end
 	which it could always do anyway; it cannot shoot from across the arena or from
 	inside somebody else.
 
-	Returns the point and whether it was trusted. An untrusted origin falls back to the
-	old hull-centre muzzle, and the projectile handler still nudges that one forward so
-	a shell does not spawn inside its own bodywork. ]]
+	It is COSMETIC. Nothing is fired from here: this is where the muzzle FLASH is
+	drawn, and it rides in the fx payload so every client's flash blooms at the real
+	barrel of the turret model. What the shot itself comes out of is shotOrigin. ]]
 local function sanitizeOrigin(originHint: any, hull: BasePart): (Vector3, boolean)
 	local fallback = hull.Position + Vector3.new(0, MUZZLE_HEIGHT, 0)
 	if typeof(originHint) ~= "Vector3" then
@@ -250,6 +268,25 @@ local function sanitizeOrigin(originHint: any, hull: BasePart): (Vector3, boolea
 		return fallback, false
 	end
 	return originHint, true
+end
+
+--[[ Where a shot is BORN, ballistically — and it is not the barrel.
+
+	The turrets sit on the ROOF: a muzzle is 7 to 10 studs above hull centre. Fire a
+	flat shot from up there and it passes clean over every other car in the arena,
+	which is the whole reason aim used to carry a downward pitch. Now that every weapon
+	shoots dead ahead (see sanitizeAim), the fix is the other half of that same pair:
+	put the shot on the car's own centre height, where every other car's hull centre
+	also is, and push it just past the bonnet so a shell cannot spawn inside its own
+	bodywork.
+
+	So a bolt is DRAWN leaving the barrel and TRAVELS from hull height. The slight
+	slant between the two reads as convergence, and is worth far more than the
+	alternative — a turret that fires over everybody's head. ]]
+local function shotOrigin(hull: BasePart, aim: Vector3): Vector3
+	local reach = math.max(hull.Size.X, hull.Size.Z) * 0.5 + MUZZLE_CLEARANCE
+	local ahead = hull.Position + aim * reach
+	return Vector3.new(ahead.X, hull.Position.Y, ahead.Z)
 end
 
 local function applySpread(direction: Vector3, spreadDegrees: number): Vector3
@@ -328,7 +365,7 @@ local function rayParams(ownerCar: Model?): RaycastParams
 	return params
 end
 
--- Crowns / coins / crates never stop a shot, whichever folder they live in.
+-- Crowns / money / crates never stop a shot, whichever folder they live in.
 local function castIgnoringPickups(origin: Vector3, delta: Vector3, params: RaycastParams): RaycastResult?
 	local result = workspace:Raycast(origin, delta, params)
 	if result and result.Instance and result.Instance:HasTag(ChassisSpec.PICKUP_TAG) then
@@ -528,9 +565,49 @@ end
 -- A handler returns false ONLY when the shot could not happen at all, which
 -- leaves the ammo in the slot.
 -- ==========================================================================
+--[=[ The pellet fan for a multi-ball weapon. `count` directions spaced evenly across
+	[-spreadDeg, +spreadDeg] about `aim`, in a plane whose ROLL is random per shot --
+	which is the "sway": the same three balls come out side by side, stacked, or on any
+	diagonal between, so a volley never reads as one fat shell.
+
+	The offset is `tan(angle)` along the fan axis before normalising, so the angle a
+	ball actually leaves at is exactly the angle asked for rather than the small-angle
+	approximation (at 5 degrees the difference is nothing; at a wide fan it is not).
+
+	A single-pellet weapon returns the aim untouched, so this is safe to route every
+	projectile through. ]=]
+local function fanDirections(aim: Vector3, count: number, spreadDeg: number): { Vector3 }
+	if count <= 1 or spreadDeg <= 0 then
+		return { aim }
+	end
+
+	--[[ Any vector not parallel to the aim gives a valid basis; world UP fails only for
+		a shot fired straight up or down, which the pitch clamp already forbids -- the
+		fallback is there so a future weapon cannot produce a zero-length cross. ]]
+	local reference = math.abs(aim.Y) > 0.99 and Vector3.xAxis or Vector3.yAxis
+	local right = aim:Cross(reference)
+	if right.Magnitude < 1e-4 then
+		right = aim:Cross(Vector3.zAxis)
+	end
+	right = right.Unit
+	local up = right:Cross(aim).Unit
+
+	local roll = rng:NextNumber(0, math.pi * 2)
+	local axis = right * math.cos(roll) + up * math.sin(roll)
+
+	local out = {}
+	local half = (count - 1) * 0.5
+	for i = 1, count do
+		local t = (i - 1 - half) / half -- -1 .. 1
+		local offset = math.tan(math.rad(t * spreadDeg))
+		out[i] = (aim + axis * offset).Unit
+	end
+	return out
+end
+
 local HANDLERS = {}
 
-HANDLERS.hitscan = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, origin: Vector3, trusted: boolean): boolean
+HANDLERS.hitscan = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, origin: Vector3, muzzle: Vector3): boolean
 	local direction = applySpread(aim, def.spread or 0)
 	local range = def.range or 0
 
@@ -553,36 +630,52 @@ HANDLERS.hitscan = function(player: Instance, car: Model, hull: BasePart, def, a
 		end
 	end
 
-	fx(def.id, { origin = origin, dir = direction, target = target, color = def.color, userId = player.UserId, hitCar = hitCar })
+	fx(def.id, { origin = muzzle, dir = direction, target = target, color = def.color, userId = player.UserId, hitCar = hitCar })
 	return true
 end
 
-HANDLERS.projectile = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, origin: Vector3, trusted: boolean): boolean
+HANDLERS.projectile = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, origin: Vector3, muzzle: Vector3): boolean
 	if #live >= CFG.MAX_LIVE_PROJECTILES then
 		return false
 	end
 
-	--[[ A trusted origin IS the barrel tip, already clear of the bodywork. The fallback
-		origin is the hull CENTRE and still has to be pushed out in front of the car, or
-		a shell spawns inside its own bonnet. ]]
-	if not trusted then
-		local reach = math.max(hull.Size.X, hull.Size.Z) * 0.5 + MUZZLE_CLEARANCE
-		origin = origin + aim * reach
+	--[[ A VOLLEY, not a shell: def.pellets balls on one press (see Config's CANNON).
+		The room left in the live table caps it rather than refusing the shot -- a busy
+		arena should thin a volley, never eat the press and the ammo with it. ]]
+	local wanted = math.max(1, math.floor(tonumber(def.pellets) or 1))
+	local room = CFG.MAX_LIVE_PROJECTILES - #live
+	local count = math.min(wanted, room)
+	local dirs = fanDirections(aim, count, tonumber(def.spreadDeg) or 0)
+	local expiresAt = os.clock() + (def.life or 0)
+	local params = rayParams(car) -- built once per SHOT, shared by every ball in it
+	local speed = def.speed or 0
+
+	--[[ `origin` came from shotOrigin: hull-centre height and already clear of the
+		bonnet, so a shell leaves at the height it can actually hit things at. `muzzle`
+		is only where it gets DRAWN from. ]]
+	for i = 1, count do
+		local dir = dirs[i] or aim
+		table.insert(live, {
+			kind = "projectile",
+			def = def,
+			owner = player,
+			part = buildProjectilePart(def, origin, dir),
+			pos = origin,
+			dir = dir,
+			speed = speed,
+			expiresAt = expiresAt,
+			params = params,
+			--[[ A ball with gravity integrates a real velocity, exactly like a lobbed
+				shell -- that is what puts it on the floor for the bounce below. Without
+				def.gravity these two stay nil and the flat path is unchanged. ]]
+			gravity = def.gravity,
+			vel = def.gravity and (dir * speed) or nil,
+			bouncesLeft = def.bounces,
+		})
 	end
 
-	table.insert(live, {
-		kind = "projectile",
-		def = def,
-		owner = player,
-		part = buildProjectilePart(def, origin, aim),
-		pos = origin,
-		dir = aim,
-		speed = def.speed or 0,
-		expiresAt = os.clock() + (def.life or 0),
-		params = rayParams(car), -- built once per shot, never per frame
-	})
-
-	fx(def.id, { origin = origin, dir = aim, color = def.color, radius = def.blastRadius, userId = player.UserId })
+	-- ONE flash and one turret kick for the volley, down the aim the player took.
+	fx(def.id, { origin = muzzle, dir = aim, color = def.color, radius = def.blastRadius, userId = player.UserId })
 	return true
 end
 
@@ -595,15 +688,10 @@ end
 	moving car to place it. The client draws a ring on the landing spot for the whole
 	flight (see FxController), because a weapon that lands from above has to be
 	dodgeable to be fair. ]=]
-HANDLERS.lob = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, origin: Vector3, trusted: boolean): boolean
+HANDLERS.lob = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, origin: Vector3, muzzle: Vector3): boolean
 	if #live >= CFG.MAX_LIVE_PROJECTILES then
 		return false
 	end
-	if not trusted then
-		local reach = math.max(hull.Size.X, hull.Size.Z) * 0.5 + MUZZLE_CLEARANCE
-		origin = origin + aim * reach
-	end
-
 	-- Where you are pointing: the first thing the aim ray meets, or the end of its range.
 	local range = def.range or 200
 	local hit = castIgnoringPickups(origin, aim * range, rayParams(car))
@@ -643,7 +731,7 @@ HANDLERS.lob = function(player: Instance, car: Model, hull: BasePart, def, aim: 
 	})
 
 	fx(def.id, {
-		origin = origin,
+		origin = muzzle,
 		dir = launchDir,
 		target = target, -- the client rings this spot for the whole flight
 		color = def.color,
@@ -663,17 +751,14 @@ end
 	because a rolling ball has no travel line to cast along. `entry.hit` latches so one
 	ball can never detonate twice while the step loop is getting round to destroying it,
 	and the owner is skipped so your own shot cannot bounce back and punish you. ]]
-HANDLERS.scatter = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, origin: Vector3, trusted: boolean): boolean
+HANDLERS.scatter = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, origin: Vector3, muzzle: Vector3): boolean
 	local pellets = math.max(def.pellets or 1, 1)
 	if #live + pellets > CFG.MAX_LIVE_PROJECTILES then
 		return false
 	end
 
+	-- shotOrigin already put this clear of the bonnet, at hull-centre height.
 	local start = origin
-	if not trusted then
-		local reach = math.max(hull.Size.X, hull.Size.Z) * 0.5 + MUZZLE_CLEARANCE
-		start = origin + aim * reach
-	end
 
 	for _ = 1, pellets do
 		local direction = coneSpread(aim, def.spreadDeg or 0)
@@ -715,7 +800,7 @@ HANDLERS.scatter = function(player: Instance, car: Model, hull: BasePart, def, a
 end
 
 -- Ignores `origin`: a mine is dropped BEHIND the car, never out of a barrel.
-HANDLERS.place = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, origin: Vector3, trusted: boolean): boolean
+HANDLERS.place = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, origin: Vector3, muzzle: Vector3): boolean
 	if #live >= CFG.MAX_LIVE_PROJECTILES then
 		return false
 	end
@@ -748,7 +833,7 @@ HANDLERS.place = function(player: Instance, car: Model, hull: BasePart, def, aim
 end
 
 -- Ignores the barrel `origin` on purpose: an aoe discharge radiates from the CAR.
-HANDLERS.aoe = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, _origin: Vector3, _trusted: boolean): boolean
+HANDLERS.aoe = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, _origin: Vector3, _muzzle: Vector3): boolean
 	local origin = hull.Position
 	local radius = def.radius or 0
 
@@ -788,7 +873,7 @@ end
 	next tick with nothing left in flight to chase it. Distance AND angle are measured
 	on the driving plane (MathUtil.flatUnit), the same plane aim is clamped to, so a
 	car on a plateau above you burns exactly like one beside you. ]]
-HANDLERS.cone = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, origin: Vector3, trusted: boolean): boolean
+HANDLERS.cone = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, origin: Vector3, muzzle: Vector3): boolean
 	local range = def.range or 0
 	local minDot = math.cos(math.rad(def.coneDeg or 30))
 	local maxTargets = def.maxTargets or 3
@@ -819,12 +904,12 @@ HANDLERS.cone = function(player: Instance, car: Model, hull: BasePart, def, aim:
 	end
 
 	-- Always broadcast: the jet has to be visible even when it is burning nothing.
-	fx(def.id, { origin = origin, dir = aim, color = def.color, radius = range, userId = player.UserId })
+	fx(def.id, { origin = muzzle, dir = aim, color = def.color, radius = range, userId = player.UserId })
 	return true
 end
 
 -- Ignores the barrel `origin`: the bubble belongs to the CAR, not to a gun.
-HANDLERS.self = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, _origin: Vector3, _trusted: boolean): boolean
+HANDLERS.self = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, _origin: Vector3, _muzzle: Vector3): boolean
 	svcCall("CombatService", "applyShield", player, def.duration or 0)
 	-- userId, not proximity: the bubble must land on THIS car even in a scrum.
 	fx(def.id, {
@@ -848,7 +933,7 @@ end
 	and the railgun fires wherever you happened to be pointing when you pressed, which
 	reads as broken every single time the car turns. The origin rides the same transform,
 	so a beam that started at a barrel 190 studs/s ago still leaves the barrel. ]=]
-HANDLERS.charged = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, origin: Vector3, _trusted: boolean): boolean
+HANDLERS.charged = function(player: Instance, car: Model, hull: BasePart, def, aim: Vector3, origin: Vector3, _muzzle: Vector3): boolean
 	if charging[player] then
 		return false -- already winding one up: the player keeps the ammo
 	end
@@ -1007,12 +1092,14 @@ local function onFireWeapon(player: Instance, aimDir: any, originHint: any)
 		return
 	end
 
-	--[[ Both are HINTS and both are clamped. The client owns the GEOMETRY of a shot —
-		it is the only side that knows where its turret is pointing — and the server owns
-		everything that follows from it. ]]
-	local origin, trusted = sanitizeOrigin(originHint, hull)
+	--[[ The client contributes ONE thing now, and it is cosmetic: where its barrel is
+		this frame, so the flash draws on the gun. The direction, and the point the shot
+		actually leaves from, are both derived here from the car itself — see
+		sanitizeAim and shotOrigin. Nothing a client sends can move a shot any more. ]]
+	local muzzle = sanitizeOrigin(originHint, hull)
 	local aim = sanitizeAim(aimDir, hull)
-	if handler(player, car, hull, def, aim, origin, trusted) == false then
+	local origin = shotOrigin(hull, aim)
+	if handler(player, car, hull, def, aim, origin, muzzle) == false then
 		return -- weapon declined (projectile cap): the player keeps the ammo
 	end
 
@@ -1110,8 +1197,58 @@ local function stepProjectile(entry, dt: number, now: number, cars): boolean
 
 	local result = castIgnoringPickups(from, to - from, entry.params)
 	if result then
+		--[=[ BOUNCE. Only off the world, and only while the budget lasts: a ball that
+			meets a CAR is a hit and must detonate on it, or the weapon would skip off
+			its own target. The reflection is the standard mirror about the surface
+			normal, damped by bounceRestitution, and the position is nudged clear along
+			that normal -- landing exactly ON the face makes the next cast start inside
+			it, which reads as the ball sticking to the floor. ]=]
+		local bounces = entry.bouncesLeft or 0
+		if bounces > 0 and entry.vel and not carModelFrom(result.Instance) then
+			local normal = result.Normal
+			local restitution = entry.def.bounceRestitution or 0.7
+			local reflected = entry.vel - 2 * entry.vel:Dot(normal) * normal
+			entry.vel = reflected * restitution
+			entry.bouncesLeft = bounces - 1
+			entry.pos = result.Position + normal * BOUNCE_CLEARANCE
+			if entry.vel.Magnitude > 1e-3 then
+				entry.dir = entry.vel.Unit
+			end
+			entry.part.CFrame = CFrame.lookAt(entry.pos, entry.pos + entry.dir)
+			fx("IMPACT", { origin = entry.pos, color = entry.def.color, radius = BOUNCE_FX_RADIUS })
+			return false
+		end
 		detonate(entry, result.Position)
 		return true
+	end
+
+	--[=[ FLAK. A ball with hitsProjectiles swats other shells out of the air: any live
+		projectile belonging to ANOTHER player inside interceptRadius is detonated where
+		it flies, and this one goes up with it.
+
+		Same-owner is skipped and that is load-bearing, not politeness -- the three balls
+		of a volley leave the barrel a few studs apart and would otherwise annihilate
+		each other on the first frame. The other shell is DETONATED here and flagged
+		`doomed`; the sweep reaps it, so nothing mutates `live` mid-walk. ]=]
+	if entry.def.hitsProjectiles and not entry.doomed then
+		local radius = entry.def.interceptRadius or 0
+		if radius > 0 then
+			for _, other in ipairs(live) do
+				if
+					other ~= entry
+					and not other.doomed
+					and other.owner ~= entry.owner
+					and INTERCEPTABLE[other.kind]
+					and other.pos
+					and (other.pos - to).Magnitude <= radius
+				then
+					detonate(other, other.pos)
+					other.doomed = true
+					detonate(entry, to)
+					return true
+				end
+			end
+		end
 	end
 
 	entry.pos = to
@@ -1178,6 +1315,8 @@ local function step(dt: number)
 
 		if entry.part == nil or entry.part.Parent == nil then
 			dead = true
+		elseif entry.doomed then
+			dead = true -- swatted by a flak ball, already detonated where it flew
 		elseif entry.kind == "ball" then
 			dead = stepBall(entry, now)
 		elseif entry.kind == "mine" then

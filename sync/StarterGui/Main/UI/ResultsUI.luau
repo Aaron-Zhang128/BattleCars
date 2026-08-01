@@ -1,5 +1,5 @@
 --[[ ResultsUI
-	End-of-round board: a three-high podium, the full standings, and the coin payout
+	End-of-round board: a three-high podium, the full standings, and the money payout
 	reveal — the dopamine beat that sends a kid into the next round.
 
 	UI module (see StarterGui.Main.Main for the ctx contract). Everything here is built
@@ -19,7 +19,7 @@
 
 	READS
 		MatchEvent (S->C) "results" { board = { {name,userId,crowns,kills,score,team}, ... },
-		                              payouts = { [userId] = coins },
+		                              payouts = { [userId] = money },
 		                              teams = { {index,name,color,score}, ... } | nil }
 		                  `score` is whatever the round's mode placed on and `teams` is
 		                  present only in a team mode — the headline becomes the
@@ -84,7 +84,7 @@ local REVEAL_VOLUME = { 1, 0.78, 0.6 } -- 1st..3rd: the reveal chime builds to t
 
 local ROW_H, ROW_PAD = 30, 4
 local ROW_HOVER_SCALE = 1.03 -- full-width rows: the house 1.07 would clip on the list edge
-local ROLL_TIME = 0.6 -- rolling coin counter duration
+local ROLL_TIME = 0.6 -- rolling money counter duration
 local ROLL_DELAY = 0.45 -- let the podium reveal land first
 local DRIFT_AMP = 3 -- px of two-sine headline drift
 local PULSE_SETTLE = 0.34 -- winner pulse waits out its own pop tween
@@ -150,11 +150,11 @@ function ResultsUI.init(ctx)
 
 	-- per-round state
 	local body = nil
-	local headline, headGrad, coinLabel, winnerScale = nil, nil, nil, nil
+	local headline, headGrad, moneyLabel, winnerScale = nil, nil, nil, nil
 	local version = 0
 	local t = 0
 	local pulseFrom = math.huge
-	local coinTarget, coinShown, rollT, rollWait = 0, -1, 0, 0
+	local moneyTarget, moneyShown, rollT, rollWait = 0, -1, 0, 0
 
 	local function applyFit()
 		local cam = workspace.CurrentCamera
@@ -337,9 +337,9 @@ function ResultsUI.init(ctx)
 			body:Destroy()
 			body = nil
 		end
-		headline, headGrad, coinLabel, winnerScale = nil, nil, nil, nil
+		headline, headGrad, moneyLabel, winnerScale = nil, nil, nil, nil
 		pulseFrom = math.huge
-		coinTarget, coinShown, rollT, rollWait = 0, -1, 0, ROLL_DELAY
+		moneyTarget, moneyShown, rollT, rollWait = 0, -1, 0, ROLL_DELAY
 
 		version += 1
 		local myVersion = version
@@ -482,11 +482,11 @@ function ResultsUI.init(ctx)
 		pay.BackgroundTransparency = 1
 		pay.Parent = body
 
-		local coins = math.max(0, math.floor(tonumber(payouts[player.UserId]) or 0))
-		coinLabel = kit.label({
+		local money = math.max(0, math.floor(tonumber(payouts[player.UserId]) or 0))
+		moneyLabel = kit.label({
 			parent = pay,
-			name = "Coins",
-			text = coins > 0 and "+0 coins!" or "Next round soon!",
+			name = "Money",
+			text = money > 0 and "+0 Money!" or "Next round soon!",
 			size = UDim2.new(1, 0, 0, 44),
 			position = UDim2.new(0.5, 0, 0, 0),
 			anchor = Vector2.new(0.5, 0),
@@ -494,10 +494,10 @@ function ResultsUI.init(ctx)
 			ramp = MONEY_RAMP,
 			stroke = 3,
 		})
-		coinTarget = coins
+		moneyTarget = money
 
 		local bonusText = ""
-		if coins > 0 and myPlace and ECON.COINS_PER_PLACEMENT[myPlace] then
+		if money > 0 and myPlace and ECON.MONEY_PER_PLACEMENT[myPlace] then
 			bonusText = ordinal(myPlace) .. " place bonus!"
 		end
 		local bonus = kit.label({
@@ -593,16 +593,16 @@ function ResultsUI.init(ctx)
 				winnerScale.Scale = MathUtil.pulse(t, 3.0, 0, 0.025)
 			end
 
-			if coinLabel and coinTarget > 0 and rollT < ROLL_TIME then
+			if moneyLabel and moneyTarget > 0 and rollT < ROLL_TIME then
 				if rollWait > 0 then
 					rollWait -= dt
 				else
 					rollT = math.min(ROLL_TIME, rollT + dt)
 					local eased = 1 - (1 - rollT / ROLL_TIME) ^ 3
-					local shown = math.floor(coinTarget * eased + 0.5)
-					if shown ~= coinShown then
-						coinShown = shown
-						coinLabel.Text = "+" .. MathUtil.comma(shown) .. " coins!"
+					local shown = math.floor(moneyTarget * eased + 0.5)
+					if shown ~= moneyShown then
+						moneyShown = shown
+						moneyLabel.Text = "+" .. MathUtil.comma(shown) .. " Money!"
 					end
 				end
 			end

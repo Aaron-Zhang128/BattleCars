@@ -613,7 +613,7 @@ function IndexUI.init(ctx)
 		end
 	end)
 
-	--[[ Reactive repaint. Coins / Gems are deliberately NOT watched: the index shows no
+	--[[ Reactive repaint. Money / Gems are deliberately NOT watched: the index shows no
 		price and no button, so a balance change cannot alter a single pixel here. ]]
 	player:GetAttributeChangedSignal(ATTR.OWNED):Connect(refreshAll)
 	player:GetAttributeChangedSignal(ATTR.EQUIPPED):Connect(refreshAll)

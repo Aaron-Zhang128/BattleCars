@@ -3,7 +3,7 @@
 
 	PROFILE SHAPE (this is what lives in the DataStore):
 		{
-			coins        = number   -- soft currency, integer, >= 0
+			money        = number   -- soft currency, integer, >= 0
 			gems         = number   -- hard currency, integer, >= 0
 			owned        = { carId, ... }   -- ARRAY of car ids, starter car always index 1
 			equipped     = carId    -- always a car present in `owned`
@@ -21,7 +21,7 @@
 		mutate -> memory + attribute + dirty flag -> autosave / leave / shutdown flush.
 
 	ATTRIBUTES OWNED (exactly one writer — this service; siblings go through the API):
-		Coins  Gems  EquippedCar  OwnedCars(JSON via CarRegistry.encodeOwned)
+		Money  Gems  EquippedCar  OwnedCars(JSON via CarRegistry.encodeOwned)
 		BestCrowns  TotalKills  ProfileLoaded
 
 	REMOTES: none. GarageService owns GarageAction; this service is pure API.
@@ -36,7 +36,7 @@
 	PUBLIC API
 		get(player)                          -> profile | nil
 		isLoaded(player)                     -> boolean   (SpawnService gates on the attribute)
-		addCoins(player, n) / addGems(...)   -> newBalance | nil
+		addMoney(player, n) / addGems(...)   -> newBalance | nil
 		spend(player, currency, amount)      -> boolean    (ONLY debit path)
 		grantCar(player, carId)              -> boolean
 		setEquipped(player, carId)           -> boolean    (applies on NEXT spawn)
@@ -58,7 +58,7 @@ local ProfileService = {}
 local CFG = Config.DATA
 local ATTR = Config.ATTR
 
-local SCHEMA_VERSION = 1
+local SCHEMA_VERSION = 2 -- v2 renamed the soft-currency field coins -> money; see migrate()
 
 --[[ Module-scoped, deliberately NOT in Config: these bound this service's shutdown and
 	write behaviour, not game feel. Nothing tunes them for design reasons. ]]
@@ -69,12 +69,12 @@ local SAVE_WAIT_POLL = 0.1
 
 -- Currency name (as used by Config.CARS[].currency) -> profile field.
 local CURRENCY_FIELD = {
-	[ATTR.COINS] = "coins",
+	[ATTR.MONEY] = "money",
 	[ATTR.GEMS] = "gems",
 }
 -- Profile field -> attribute name.
 local CURRENCY_ATTR = {
-	coins = ATTR.COINS,
+	money = ATTR.MONEY,
 	gems = ATTR.GEMS,
 }
 
@@ -154,8 +154,19 @@ local function migrate(data)
 
 	out.version = isFiniteNumber(out.version) and math.floor(out.version) or 0
 
+	--[[ v1 -> v2: the soft currency was renamed coins -> money everywhere, including this
+		field. A v1 payload carries the balance under `coins` and nothing under `money`, so
+		it is MOVED here — reading it as a missing field would silently zero the wallet of
+		every player who banked anything before the rename. The old key is then dropped so
+		the next save does not carry a stale second balance forward. Only an ABSENT `money`
+		takes the old value: if both exist, the new field is already authoritative. ]]
+	if out.version < 2 and out.money == nil and isFiniteNumber(out.coins) then
+		out.money = out.coins
+	end
+	out.coins = nil
+
 	-- v0 -> v1: original shape. Nothing to move, only normalize.
-	out.coins = wholeAtLeastZero(out.coins, 0)
+	out.money = wholeAtLeastZero(out.money, 0)
 	out.gems = wholeAtLeastZero(out.gems, 0)
 	out.bestCrowns = wholeAtLeastZero(out.bestCrowns, 0)
 	out.totalKills = wholeAtLeastZero(out.totalKills, 0)
@@ -212,7 +223,7 @@ local function retryAsync(label: string, attempts: number, fn)
 end
 
 local function mirror(player: Instance, profile)
-	player:SetAttribute(ATTR.COINS, profile.coins)
+	player:SetAttribute(ATTR.MONEY, profile.money)
 	player:SetAttribute(ATTR.GEMS, profile.gems)
 	player:SetAttribute(ATTR.EQUIPPED, profile.equipped)
 	player:SetAttribute(ATTR.OWNED, CarRegistry.encodeOwned(ownedSet(profile)))
@@ -254,9 +265,9 @@ local function applyStudioTestFlags(profile)
 		end
 	end
 
-	local startCoins = Config.TEST.START_COINS
-	if isFiniteNumber(startCoins) and startCoins > 0 and profile.coins < startCoins then
-		profile.coins = math.floor(startCoins)
+	local startMoney = Config.TEST.START_MONEY
+	if isFiniteNumber(startMoney) and startMoney > 0 and profile.money < startMoney then
+		profile.money = math.floor(startMoney)
 	end
 end
 
@@ -326,7 +337,7 @@ end
 	the store survive, then overwrites every field this server owns from memory. ]]
 local function serialize(profile, raw)
 	local out = migrate(raw)
-	out.coins = profile.coins
+	out.money = profile.money
 	out.gems = profile.gems
 	out.bestCrowns = profile.bestCrowns
 	out.totalKills = profile.totalKills
@@ -471,7 +482,7 @@ function ProfileService.isLoaded(player: Instance): boolean
 	return profile ~= nil
 end
 
---[[ Shared by addCoins / addGems. Negative amounts are allowed (they are how a refundable
+--[[ Shared by addMoney / addGems. Negative amounts are allowed (they are how a refundable
 	adjustment is expressed) and the balance clamps at 0. spend() is the guarded debit path. ]]
 local function addCurrency(player: Instance, field: string, amount: number)
 	local profile = readyProfile(player)
@@ -494,15 +505,15 @@ local function addCurrency(player: Instance, field: string, amount: number)
 	return profile[field]
 end
 
-function ProfileService.addCoins(player: Instance, amount: number)
-	return addCurrency(player, "coins", amount)
+function ProfileService.addMoney(player: Instance, amount: number)
+	return addCurrency(player, "money", amount)
 end
 
 function ProfileService.addGems(player: Instance, amount: number)
 	return addCurrency(player, "gems", amount)
 end
 
---[[ The ONLY debit path. `currency` must be exactly Config.ATTR.COINS or Config.ATTR.GEMS
+--[[ The ONLY debit path. `currency` must be exactly Config.ATTR.MONEY or Config.ATTR.GEMS
 	(i.e. the strings Config.CARS[].currency uses). Balance check and deduction happen with
 	no yield between them, so a double-spend cannot slip through. ]]
 function ProfileService.spend(player: Instance, currency: string, amount: number): boolean

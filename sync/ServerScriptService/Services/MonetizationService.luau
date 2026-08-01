@@ -6,7 +6,7 @@
 		* Owns ProcessReceipt end to end: dedup ring, grant dispatch, grant-then-confirm.
 		* Resolves game-pass ownership once per join and mirrors every perk to an attribute,
 		  so the shop UI reads perks with zero remotes.
-		* Publishes the ONE coin multiplier ScoreService applies at payout.
+		* Publishes the ONE money multiplier ScoreService applies at payout.
 
 	INERT UNTIL CONFIGURED
 		Every id in Config.PRODUCTS / Config.PASSES is 0 until the products exist in the
@@ -18,7 +18,7 @@
 		  -> perk attributes written as definite false / 0 / 1 (the UI never reads nil)
 		  -> UserOwnsGamePassAsync per configured pass (each in its own pcall; a Marketplace
 		     outage degrades to "no perks this session" and never blocks the join)
-		  -> perk attributes + CoinMultiplier
+		  -> perk attributes + MoneyMultiplier
 		ProfileLoaded flips true
 		  -> mirror Spins, settle any outstanding one-time pass grant
 		buy product
@@ -30,14 +30,14 @@
 
 	ATTRIBUTES OWNED (sole writer, per Main's ownership table)
 		Vip             boolean  VIP pass held
-		DoubleCoins     boolean  2x Coins pass held
+		DoubleMoney     boolean  2x Money pass held
 		Magnet          boolean  Crown Magnet pass held (no gameplay consumer yet — HANDOFF)
 		GoldenCar       boolean  Golden Car pass held
 		Spins           number   lucky spins banked
-		CoinMultiplier  number   VIP x DoubleCoins x Premium, clamped to MAX_TOTAL_COIN_MULTIPLIER
+		MoneyMultiplier number   VIP x DoubleMoney x Premium, clamped to MAX_TOTAL_MONEY_MULTIPLIER
 		Reads only: Config.ATTR.PROFILE_LOADED (ProfileService), to know when a profile is safe.
 		Writes NO other service's attribute — notably not Lives (SpawnService) and not
-		Coins/Gems/OwnedCars (ProfileService), which move only through their APIs.
+		Money/Gems/OwnedCars (ProfileService), which move only through their APIs.
 
 	REMOTES
 		Monetization  C->S  (action: "product"|"pass"|"claimGroup"|"claimFavourite", key: string?)
@@ -51,7 +51,7 @@
 		handler is a bridge and deliberately adds no second policy layer.
 
 	SERVICES USED — resolved LAZILY through ctx.svc at call time, never captured at init:
-		ProfileService  isLoaded get addCoins addGems grantCar  (+ flush: see HANDOFF)
+		ProfileService  isLoaded get addMoney addGems grantCar  (+ flush: see HANDOFF)
 		SpawnService    addLives  (does NOT exist yet: see HANDOFF. Until it does, the Extra
 		                Life product returns NotProcessedYet, so nobody is charged for nothing)
 
@@ -60,12 +60,12 @@
 		reads a perk. Touches no sibling during init.
 
 	FAIRNESS
-		Coins are progression and are safe to multiply. Crowns are the competitive score and
+		Money is progression and is safe to multiply. Crowns are the competitive score and
 		are deliberately NOT multiplied anywhere in this file — see the fairness flag in
 		Config's monetization comment before adding anything that touches crowns.
 
 	PUBLIC API
-		coinMultiplier(player)       -> number    the ONE call ScoreService makes at payout
+		moneyMultiplier(player)      -> number    the ONE call ScoreService makes at payout
 		hasPerk(player, perk)        -> boolean   perk name ("vip") or pass key ("VIP")
 		extraLives(player)           -> number    perk-derived extra lives, for resetLives
 		spins(player)                -> number
@@ -91,16 +91,16 @@ local CFG = Config.MONETIZATION
 local ATTR = Config.ATTR -- read only: PROFILE_LOADED
 
 --[[ Attributes this service owns. The names are exactly the ones recorded in Main's
-	ownership table (Vip DoubleCoins Magnet GoldenCar Spins CoinMultiplier). They are not in
+	ownership table (Vip DoubleMoney Magnet GoldenCar Spins MoneyMultiplier). They are not in
 	Config.ATTR yet — HANDOFF has the paste-ready block — so they live here as a local table
 	rather than as bare strings scattered through the file. ]]
 local MON_ATTR = {
 	VIP = "Vip",
-	DOUBLE_COINS = "DoubleCoins",
+	DOUBLE_MONEY = "DoubleMoney",
 	MAGNET = "Magnet",
 	GOLDEN_CAR = "GoldenCar",
 	SPINS = "Spins",
-	COIN_MULTIPLIER = "CoinMultiplier",
+	MONEY_MULTIPLIER = "MoneyMultiplier",
 }
 
 --[[ Config.PASSES[*].perk -> the attribute mirroring it. Driven by perk name, not pass key,
@@ -110,15 +110,15 @@ local MON_ATTR = {
 	answers from the ownership cache; see HANDOFF if the shop needs it replicated too. ]]
 local PERK_ATTR = {
 	vip = MON_ATTR.VIP,
-	doubleCoins = MON_ATTR.DOUBLE_COINS,
+	doubleMoney = MON_ATTR.DOUBLE_MONEY,
 	magnet = MON_ATTR.MAGNET,
 	goldenCar = MON_ATTR.GOLDEN_CAR,
 }
 
--- Perk -> coin multiplier. Only these two perks touch earn rate; nothing here touches crowns.
+-- Perk -> money multiplier. Only these two perks touch earn rate; nothing here touches crowns.
 local PERK_MULTIPLIER = {
-	vip = CFG.VIP_COIN_MULTIPLIER,
-	doubleCoins = CFG.DOUBLE_COIN_MULTIPLIER,
+	vip = CFG.VIP_MONEY_MULTIPLIER,
+	doubleMoney = CFG.DOUBLE_MONEY_MULTIPLIER,
 }
 
 --[[ Group id for the free-gems reward. 0 = UNCONFIGURED, exactly like every product id:
@@ -339,11 +339,11 @@ local function isPremium(player: Instance): boolean
 	return ok and premium == true
 end
 
---[[ The ONE multiplier ScoreService applies at payout: VIP x DoubleCoins x Premium, clamped
-	to CFG.MAX_TOTAL_COIN_MULTIPLIER so stacked perks cannot break the coin economy.
+--[[ The ONE multiplier ScoreService applies at payout: VIP x DoubleMoney x Premium, clamped
+	to CFG.MAX_TOTAL_MONEY_MULTIPLIER so stacked perks cannot break the money economy.
 	Returns 1 for an unknown player, and 1 (plus Premium) during the brief join window before
 	the ownership scan lands — never nil, so a caller can always multiply by it. ]]
-function MonetizationService.coinMultiplier(player: Instance): number
+function MonetizationService.moneyMultiplier(player: Instance): number
 	if not isPlayer(player) then
 		return 1
 	end
@@ -360,10 +360,10 @@ function MonetizationService.coinMultiplier(player: Instance): number
 		end
 	end
 	if isPremium(player) then
-		multiplier *= CFG.PREMIUM_COIN_MULTIPLIER
+		multiplier *= CFG.PREMIUM_MONEY_MULTIPLIER
 	end
 
-	return math.clamp(multiplier, 1, CFG.MAX_TOTAL_COIN_MULTIPLIER)
+	return math.clamp(multiplier, 1, CFG.MAX_TOTAL_MONEY_MULTIPLIER)
 end
 
 --[[ Extra lives a player's perks are worth at round start. SpawnService.resetLives adds this
@@ -397,7 +397,7 @@ local function writePerkAttributes(player: Instance)
 	for perk, attrName in pairs(PERK_ATTR) do
 		player:SetAttribute(attrName, MonetizationService.hasPerk(player, perk))
 	end
-	player:SetAttribute(MON_ATTR.COIN_MULTIPLIER, MonetizationService.coinMultiplier(player))
+	player:SetAttribute(MON_ATTR.MONEY_MULTIPLIER, MonetizationService.moneyMultiplier(player))
 end
 
 local function writeSpinsAttribute(player: Instance, value: number)
@@ -442,7 +442,7 @@ end
 -- one-time pass grants
 -- ==========================================================================
 
---[[ Applies a pass's one-time grants (Config.PASSES[*].grantCoins / grantCar) once EVER,
+--[[ Applies a pass's one-time grants (Config.PASSES[*].grantMoney / grantCar) once EVER,
 	latched in profile.flags.
 
 	Called from BOTH the purchase event and the join ownership scan on purpose: a pass bought
@@ -451,9 +451,9 @@ end
 	event", and the latch is what stops the join scan re-granting it every join.
 
 	The config is validated BEFORE anything is mutated, and there is no yield between the
-	latch and the grants — and coins, car and latch are all fields of the SAME profile table,
+	latch and the grants — and money, car and latch are all fields of the SAME profile table,
 	so one UpdateAsync persists them together or not at all. There is no window where the
-	coins persist without the latch, or the latch without the coins.
+	money persists without the latch, or the latch without the money.
 
 	Returns true only when it actually granted something (the caller then flushes). ]]
 local function applyPassGrants(player: Instance, passKey: string): boolean
@@ -462,9 +462,9 @@ local function applyPassGrants(player: Instance, passKey: string): boolean
 		return false
 	end
 
-	local coins = positiveAmount(def.grantCoins) and math.floor(def.grantCoins) or 0
+	local money = positiveAmount(def.grantMoney) and math.floor(def.grantMoney) or 0
 	local carId = type(def.grantCar) == "string" and def.grantCar or nil
-	if coins == 0 and not carId then
+	if money == 0 and not carId then
 		return false -- nothing one-time about this pass
 	end
 	if carId and not CarRegistry.exists(carId) then
@@ -488,8 +488,8 @@ local function applyPassGrants(player: Instance, passKey: string): boolean
 
 	flags[flag] = true
 	profile.dirty = true
-	if coins > 0 then
-		profileCall("addCoins", player, coins)
+	if money > 0 then
+		profileCall("addMoney", player, money)
 	end
 	if carId then
 		profileCall("grantCar", player, carId)
@@ -719,8 +719,8 @@ local GRANTS = {
 		return ok and type(balance) == "number"
 	end,
 
-	coins = function(player: Instance, amount: number): boolean
-		local ok, balance = profileCall("addCoins", player, amount)
+	money = function(player: Instance, amount: number): boolean
+		local ok, balance = profileCall("addMoney", player, amount)
 		return ok and type(balance) == "number"
 	end,
 

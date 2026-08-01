@@ -14,7 +14,7 @@
 		ARENA      procedural arena dimensions and features
 		CARS       car roster (stats + procedural build recipe + signature powerup)
 		POWERUPS   weapon definitions
-		PICKUPS    crown / coin / crate spawning
+		PICKUPS    crown / money / crate spawning
 		ECONOMY    payout rates
 		UI         palette, fonts, motion (mirrors house DNA)
 		PRODUCTS   monetization seams (unpopulated until publish)
@@ -40,7 +40,7 @@ Config.ATTR = {
 	POWERUP_AMMO = "PowerupAmmo", -- shots left in slot
 	SHIELDED = "Shielded", -- boolean: shield powerup active
 	FROZEN = "Frozen", -- boolean: freeze debuff active
-	COINS = "Coins", -- persistent soft currency
+	MONEY = "Money", -- persistent soft currency
 	GEMS = "Gems", -- persistent hard currency
 	EQUIPPED = "EquippedCar", -- car id
 	OWNED = "OwnedCars", -- JSON array of car ids
@@ -874,7 +874,7 @@ Config.CARS = {
 		name = "Convertible",
 		rarity = "COMMON",
 		price = 0,
-		currency = "Coins",
+		currency = "Money",
 		starter = true,
 		model = "convertible", -- Assets.CarModels.convertible
 		-- Wheel hubs, MEASURED from the model's dark low geometry and then symmetrised
@@ -893,7 +893,7 @@ Config.CARS = {
 		name = "Pickup",
 		rarity = "COMMON",
 		price = 500,
-		currency = "Coins",
+		currency = "Money",
 		model = "pickup", -- Assets.CarModels.pickup
 		-- Wheel hubs, MEASURED from the model's dark low geometry and then symmetrised
 		-- (a car is symmetric, so averaging the four corners repairs lopsided models).
@@ -911,7 +911,7 @@ Config.CARS = {
 		name = "Blue Truck",
 		rarity = "UNCOMMON",
 		price = 1500,
-		currency = "Coins",
+		currency = "Money",
 		model = "bluetruck", -- Assets.CarModels.bluetruck
 		-- Wheel hubs, MEASURED from the model's dark low geometry and then symmetrised
 		-- (a car is symmetric, so averaging the four corners repairs lopsided models).
@@ -929,7 +929,7 @@ Config.CARS = {
 		name = "Black SUV",
 		rarity = "UNCOMMON",
 		price = 3000,
-		currency = "Coins",
+		currency = "Money",
 		model = "blacksuv", -- Assets.CarModels.blacksuv
 		-- Wheel hubs, MEASURED from the model's dark low geometry and then symmetrised
 		-- (a car is symmetric, so averaging the four corners repairs lopsided models).
@@ -947,7 +947,7 @@ Config.CARS = {
 		name = "Red Van",
 		rarity = "RARE",
 		price = 7500,
-		currency = "Coins",
+		currency = "Money",
 		model = "redvan", -- Assets.CarModels.redvan
 		-- Wheel hubs, MEASURED from the model's dark low geometry and then symmetrised
 		-- (a car is symmetric, so averaging the four corners repairs lopsided models).
@@ -965,7 +965,7 @@ Config.CARS = {
 		name = "Compact",
 		rarity = "RARE",
 		price = 12000,
-		currency = "Coins",
+		currency = "Money",
 		model = "compact", -- Assets.CarModels.compact
 		-- Wheel hubs, MEASURED from the model's dark low geometry and then symmetrised
 		-- (a car is symmetric, so averaging the four corners repairs lopsided models).
@@ -983,7 +983,7 @@ Config.CARS = {
 		name = "Green SUV",
 		rarity = "EPIC",
 		price = 20000,
-		currency = "Coins",
+		currency = "Money",
 		model = "greensuv", -- Assets.CarModels.greensuv
 		-- Wheel hubs, MEASURED from the model's dark low geometry and then symmetrised
 		-- (a car is symmetric, so averaging the four corners repairs lopsided models).
@@ -1056,28 +1056,29 @@ Config.STARTER_CAR = "convertible"
 
 -- ==========================================================================
 -- POWERUPS — one slot at a time, like the original.
--- kind: "projectile" | "place" | "hitscan" | "aoe" | "self" | "cone"
+-- kind: "projectile" | "lob" | "place" | "hitscan" | "aoe" | "self" | "cone"
 --
--- FOUR of these are MODELLED weapons: they physically bolt onto the car roof and
--- animate when they fire (GUN, ROCKET, CANNON, FLAME). Their ART contract is
--- Config.WEAPON_RIGS below and the rig is assembled client-side by
--- TurretController; the numbers HERE stay the single source of balance.
+-- SEVEN of these are MODELLED weapons: they physically bolt onto the car roof and
+-- animate when they fire (GUN, DUALGUN, CANNON, MORTAR, ROCKET, FLAME, RAILGUN).
+-- Their ART contract is Config.WEAPON_RIGS below and the rig is assembled
+-- client-side by TurretController; the numbers HERE stay the single source of balance.
 --
 -- MINE / FREEZE / ZAP are still fully defined and still work, but they are out of
 -- PowerupDefs.ORDER, so nothing rolls them: they have no turret model, and a
--- weapon you cannot see on your own roof reads as a bug beside four you can.
+-- weapon you cannot see on your own roof reads as a bug beside seven you can.
 -- Put an id back in ORDER to bring it back — nothing else has to change.
 -- ==========================================================================
 Config.POWERUPS = {
 	--[[ MISSILE POD (Assets.Weapons.ROCKET). GUIDED, which is what earns the pod its
 		name: the shell steers toward the nearest car ahead of it, while the cannon
-		below fires dead straight. Two shots, so each one hits softer than the old
-		one-shot rocket. ]]
+		below fires dead straight. Six shots, so each one hits softer than the old
+		one-shot rocket and the pod plays as a salvo you spend rather than a single
+		verdict. At 0.75s cooldown that is ~3.8s of held fire. ]]
 	ROCKET = {
 		id = "ROCKET",
 		name = "Missiles",
 		kind = "projectile",
-		ammo = 2,
+		ammo = 6,
 		cooldown = 0.75,
 		damage = 190, -- 1.9 chunks
 		speed = 200,
@@ -1160,23 +1161,61 @@ Config.POWERUPS = {
 		color = Color3.fromRGB(150, 235, 255),
 		weight = 6, -- the rarest roll in the crate pool by a factor of four
 	},
-	--[[ CANNON (Assets.Weapons.CANNON). The heavy: one slow shell, the biggest blast
-		and the biggest knockback in the game, and it does NOT steer. Ammo 1 is what
-		keeps firing it a decision rather than a reflex. ]]
+	--[=[ CANNON (Assets.Weapons.CANNON). The heavy — now a TRIPLE: one press throws
+		three balls in a narrow fan that skip along the floor and swat other shells out
+		of the air. It still does not steer.
+
+		DAMAGE WAS SPLIT, NOT TRIPLED, AND THE SPLIT IS TIGHTER THAN IT LOOKS. At the
+		old 320 a volley would have been 960 — more than the health of any car, an
+		instant delete from any range. But 150 each (450 a volley) was still a one-shot
+		on the four 400 hp cars, because THE FAN DOES NOT ACTUALLY SEPARATE THE HITS:
+		at 5 degrees the outer balls are only 8.7 studs off centre at 100 studs, well
+		inside a blast radius, so all three land on the same car out to ~170 studs and
+		the spread costs the shooter nothing. Measured, not assumed.
+
+		So the volley is priced as ONE shell: 3 x 110 = 330, within a few points of the
+		320 it replaced. What the player gains is the skipping, the flak, and three
+		chances to clip a car they half-missed — not a bigger number. Blast came down
+		to 12 with it: three overlapping 22-stud blasts covered a quarter of the
+		crossing.
+
+		SPREAD is the whole weapon. The three go out at -SPREAD_DEG / 0 / +SPREAD_DEG
+		about the aim, and the FAN PLANE rolls at random every shot, so a volley is
+		sometimes side-by-side and sometimes stacked — that is the "sway", and it is
+		what stops three balls reading as one fat one.
+
+		GRAVITY is what makes "bounces off the floor" mean anything: without it a flat
+		shot never meets the ground and the bounce code would never run. At 60 with a
+		260-stud/s ball the first touchdown is ~105 studs out, and each bounce keeps
+		BOUNCE_RESTITUTION of the reflected velocity, so it skips along the arena floor
+		at roughly hull height instead of arcing over everyone like the mortar.
+
+		INTERCEPT: a ball detonates any other player's shell it comes within
+		interceptRadius of, and goes up with it. It cannot touch its own volley (same
+		owner), which is the only reason three balls flying side by side survive the
+		muzzle. ]=]
 	CANNON = {
 		id = "CANNON",
 		name = "Cannon",
 		kind = "projectile",
 		ammo = 1,
 		cooldown = 1.1,
-		damage = 320, -- 3.2 chunks — the hardest single hit available
+		damage = 110, -- x3 = 330 a volley, against the single 320 shell it replaces
 		speed = 260,
 		life = 2.6,
-		blastRadius = 22,
-		knockback = 130,
-		size = Vector3.new(2, 2, 3.4),
+		blastRadius = 12,
+		knockback = 45, -- per ball; x3 lands near the 130 one shell used to carry
+		size = Vector3.new(2.2, 2.2, 2.2), -- a ball, and the hitbox the client draws around
 		color = Color3.fromRGB(255, 221, 51),
 		weight = 16,
+
+		pellets = 3,
+		spreadDeg = 5, -- the fan half-angle: 0 for the middle ball, 5 for the outer two
+		gravity = 60, -- studs/s^2. See above: this is what puts the ball on the floor.
+		bounces = 3,
+		bounceRestitution = 0.78, -- of the reflected velocity kept per skip
+		hitsProjectiles = true,
+		interceptRadius = 7,
 	},
 	--[[ FLAMETHROWER (Assets.Weapons.FLAME). Hold to fire. Every tick burns every car
 		inside a short cone, so it is the one weapon that punishes tailgating instead
@@ -1195,6 +1234,47 @@ Config.POWERUPS = {
 		knockback = 6,
 		color = Color3.fromRGB(255, 120, 30),
 		weight = 20,
+	},
+	--[=[ MORTAR (Assets.Weapons.MORTAR). The indirect weapon: the shell LOBS, so it is
+		the only thing in the game that can reach a car sitting behind a plateau. The
+		server casts your aim to find the SPOT you are pointing at and then solves the
+		launch velocity that puts the shell on that spot in exactly arcTime seconds —
+		so where it lands is what you aimed at, and the only thing you have to learn is
+		how far ahead of a moving car to place it. ]=]
+	MORTAR = {
+		id = "MORTAR",
+		name = "Mortar",
+		kind = "lob",
+		ammo = 3,
+		cooldown = 1.4,
+		damage = 300, -- 3 chunks, all of it blast: a direct hit is not a special case
+		blastRadius = 30, -- the widest in the game; it is aimed at ground, not at cars
+		knockback = 110,
+		arcTime = 1.35, -- muzzle to landing, whatever the distance
+		gravity = 260, -- studs/s^2 on the shell; with arcTime this sets how high it climbs
+		range = 320, -- how far along your aim the landing spot may be
+		minRange = 34, -- nearer than this it lands here, so you cannot blast your own bumper
+		life = 6, -- despawn backstop; the arc always lands well inside it
+		size = Vector3.new(2.2, 2.2, 2.2),
+		color = Color3.fromRGB(150, 225, 120),
+		weight = 14,
+	},
+	--[=[ TWIN GUNS (Assets.Weapons.DUALGUN). Hold to fire like the plasma gun, but the
+		two barrels alternate, each hit is lighter and the cone is wider: this is the gun
+		for holding a lane at close range, where the plasma gun is the gun for picking a
+		target across the arena. ]=]
+	DUALGUN = {
+		id = "DUALGUN",
+		name = "Twin Guns",
+		kind = "hitscan",
+		ammo = 36,
+		cooldown = 0.07,
+		damage = 17, -- ~6 hits per chunk; DPS lands just under the plasma gun's
+		range = 190,
+		spread = 3.4, -- degrees — wider than GUN, so distance is where it loses
+		knockback = 3,
+		color = Color3.fromRGB(90, 240, 190),
+		weight = 22,
 	},
 	MINE = {
 		id = "MINE",
@@ -1254,7 +1334,7 @@ Config.POWERUPS = {
 
 Config.SPECIAL_WEIGHT_BONUS = 40 -- added to a car's signature powerup weight in crate rolls
 -- ==========================================================================
--- WEAPON_RIGS — the ART contract for the four modelled weapons.
+-- WEAPON_RIGS — the ART contract for the seven modelled weapons.
 --
 -- Assets.Weapons.<model> is PRE-NORMALISED (built once from ServerStorage.WeaponSource):
 -- the Base's bottom face sits at the rig origin, the rig is centred in X/Z, and the
@@ -1269,6 +1349,9 @@ Config.SPECIAL_WEIGHT_BONUS = 40 -- added to a car's signature powerup weight in
 --   Turret  yaws to follow your aim
 --   Muzzle  recoils / spins when it fires. ABSENT on CANNON and ROCKET, where the
 --           Turret itself IS the moving barrel — recoilPart names whichever moves.
+--   Muzzle2 optional SECOND barrel (DUALGUN). Poses exactly like Muzzle, so a twin
+--           gun needs no new pose code — only `muzzleSpread`, which alternates which
+--           barrel a shot leaves from.
 --   Ammo    ROCKET only: the missile mesh the client skins the flying shell with.
 --
 -- `muzzle` is rig-space and is where a shot visually leaves: fx origin, muzzle
@@ -1319,6 +1402,26 @@ Config.WEAPON_RIGS = {
 		spinDecay = 0,
 		shake = 0.16,
 	},
+	--[[ THE POD CARRIES AN EXTRA 270 DEGREES, BAKED INTO THE ASSET. The normaliser gave
+		all four originals the same +90 yaw on the assumption they were laid out facing
+		+X; the missile pod was not, so it sat a quarter turn off on the roof while its
+		own missile flew straight. It was first corrected +90 (2026-07-31, on sight: "the
+		rocket launcher should be tilted 90 degrees counter-clockwise"), which squared it
+		up but left it pointing BACKWARDS -- so a further +180 landed on the same day
+		("faced 180 degree the opposite way"). Total baked yaw is 270.
+
+		Both passes rotated Base and Turret about Y ABOUT THE RIG ORIGIN, so the pod spins
+		in place rather than orbiting the mount, and `Assets.Weapons.ROCKET` carries the
+		attribute PodYawFix = 270 to record the running total.
+
+		A RE-EXPORT WILL UNDO THIS. Re-run the normaliser and then re-apply the extra
+		270, or the pod comes back sideways. The Ammo mesh was deliberately NOT rotated
+		with it -- that is the flying missile, not part of the pod, and its nose is
+		already verified against the direction of travel.
+
+		`muzzle` stays as authored: it is a RIG-space point (-Z is forward, where the
+		shot goes), not a point on the model, and the pod is square enough in plan that
+		the top of it is the top of it either way. ]]
 	ROCKET = {
 		model = "ROCKET",
 		muzzle = Vector3.new(0, 6.00, -0.60), -- missiles leave the TOP of the pod
@@ -1345,13 +1448,66 @@ Config.WEAPON_RIGS = {
 		spinDecay = 0,
 		shake = 0.14, -- the nozzle judders instead
 	},
+	--[[ MORTAR. Muzzle tip measured at z = -2.21; the point below sits a little ahead
+		of it so the launch flash blooms off the mouth of the tube rather than inside
+		it. The tube is short and stubby, which is why it is the ONE weapon whose shot
+		leaves nearly over the mount. ]]
+	MORTAR = {
+		model = "MORTAR",
+		muzzle = Vector3.new(0, 3.30, -2.60),
+		yawSpeed = 230, -- the slowest traverse in the game: siege kit, not a turret
+		yawLimit = 90,
+		recoilPart = "Turret", -- the tube rears back and the muzzle rides with it
+		recoilStuds = 0.85, -- + ~1.0 more from recoilPitch about the rig origin
+		recoilPitch = 13.0,
+		recoilReturn = 0.40, -- the slowest settle: you watch it reload itself
+		spinSpeed = 0,
+		spinDecay = 0,
+		shake = 0.18,
+	},
+	--[[ TWIN GUNS. The only rig with a Muzzle2, and `muzzleSpread` is not a guess: the
+		two barrels are modelled at x = -0.31 and +0.31, so a shot's flash, tracer and
+		claimed origin all land on the barrel that actually kicked. ]]
+	DUALGUN = {
+		model = "DUALGUN",
+		muzzle = Vector3.new(0, 2.43, -3.10),
+		muzzleSpread = 0.31, -- barrels sit this far either side of centre; shots alternate
+		yawSpeed = 500,
+		yawLimit = 110,
+		recoilPart = "Muzzle", -- both barrels kick; the housing holds still
+		recoilStuds = 0.45,
+		recoilPitch = 1.8,
+		recoilReturn = 0.08, -- snappy: it has to be back before the next shot
+		spinSpeed = 0, -- hex barrels, not a minigun: they buck, they do not roll
+		spinDecay = 0,
+		shake = 0.09,
+	},
 }
 
--- Shared rig behaviour, identical for all four.
+-- Shared rig behaviour, identical for all seven.
 Config.WEAPON_RIG = {
 	MOUNT_LIFT = 0.05, -- studs above Hull.WeaponMount, so the base never z-fights the roof
 	FIRE_HOLD = 0.22, -- seconds a shot counts as "still firing" (drives spin + shake)
 	MAX_RIGS = 12, -- one per car in a full round; a hard ceiling on client cost
+
+	--[[ MOUNTING. A weapon does not appear, it ARRIVES: the whole rig scales up from
+		nothing with the house back-out overshoot (the same curve every card in the UI
+		pops on), and scales away again when the slot empties. It is the one moment the
+		player is told "you have a weapon now" while their eyes are on the road, and a
+		model that simply blinks into existence reads as a replication glitch.
+
+		The rig scales about the MOUNT, so a growing gun rises out of the roof rather
+		than inflating through it. OVERSHOOT is the fraction past full size the pop
+		reaches; 0 makes it a plain ease. START is where it begins -- not 0, because a
+		zero-size MeshPart is clamped by the engine and pops visibly at the first
+		frame. ]]
+	MOUNT_GROW_TIME = 0.34,
+	MOUNT_OVERSHOOT = 0.16,
+	MOUNT_START_SCALE = 0.06,
+	--[[ Faster than the grow on purpose: arriving is an event worth watching, leaving
+		is just tidying up, and the slot is usually emptying because you FIRED the last
+		shot -- the shot is what should hold the eye, not the disappearing barrel. ]]
+	MOUNT_SHRINK_TIME = 0.18,
 }
 
 -- ==========================================================================
@@ -1400,43 +1556,248 @@ Config.WEAPONS = {
 		STRAIGHT AHEAD: 0 means a shot always leaves along the car's own heading, so you
 		steer to aim and nobody can shoot sideways or backwards out of a car.
 
-		THREE places obey this one number, and they must never disagree or the barrel
-		would point somewhere the bullet does not go:
-		  WeaponService.sanitizeAim      the authoritative clamp on the shot
-		  WeaponRig.setAim               how far the turret model may swivel
-		  WeaponController.clampToCone   the client's own prediction, so the flash and
-		                                 the bolt leave at the angle you actually fired
-		Raise it to give the turrets a swivel back — 25 or 30 reads as "a bit of aim"
-		without letting anyone fire off the side. PITCH is separate and unaffected
-		(AIM_MAX_PITCH_DEG below); it has to stay free or shots from the barrel would
-		sail over every car. ]]
+		STEERING IS AIMING. At 0 — the shipped value — the aim a client sends is not
+		read at all: WeaponService.sanitizeAim returns the car's own flat heading and
+		WeaponService.shotOrigin drops the shot to hull-centre height so it can hit the
+		cars in front of it. Those two are ONE change and must never be split; see the
+		comment on shotOrigin for why a flat shot from a roof turret otherwise flies
+		over everybody.
+
+		FOUR places obey this one number, and they must never disagree, or a barrel
+		points somewhere the bullet does not go:
+		  WeaponService.sanitizeAim        the authoritative direction of every shot
+		  WeaponRig.setAim                 how far a turret model may swivel
+		  WeaponController.firingAxis      the client's prediction and its wire value
+		  TurretController.aimFor          which pose a live turret tracks
+		Raise it to 25 or 30 to hand aiming back: the turrets swivel again, the cursor
+		starts contributing yaw, and AIM_MAX_PITCH_DEG below starts applying. At 0 that
+		pitch key is not read. ]]
 	AIM_MAX_YAW_DEG = 0,
 	BLAST_EDGE_FRACTION = 0.30, -- explosion damage at blastRadius, tapering from 1.0 at centre
 
-	--[[ SHOTS LEAVE THE BARREL, and the barrel is CLIENT-SUPPLIED — only the firing
-		client knows where its turret is pointing this frame, because the turret model is
-		drawn locally (see TurretController). So FireWeapon now carries an origin as well
-		as a direction, and both are CLAIMS the server clamps:
-		  * the origin must sit within MAX_MUZZLE_OFFSET of that player's own hull, or it
-		    is thrown away for the old hull-centre muzzle. The worst a forged packet can
-		    do is fire from its own car, which it could always do.
-		  * the direction may now PITCH, which it had to: a barrel sits ~8 studs above
-		    hull centre, so a flat shot from it sails clean over every other car's roof.
-		    AIM_MAX_PITCH_DEG stops anyone firing at the sky or straight into the floor,
-		    and the yaw cone above still applies on the driving plane.
-		Damage, ammo, cooldown and hit detection stay entirely server-decided. The client
-		contributes GEOMETRY, never an outcome. ]]
+	--[[ A shot is DRAWN leaving the barrel and TRAVELS from hull-centre height, and
+		the client's only contribution to either is cosmetic: it sends the barrel it
+		fired from so every machine's muzzle flash blooms on the gun rather than the
+		bonnet. MAX_MUZZLE_OFFSET clamps that claim to somewhere on the sender's own
+		car — the worst a forged packet can do is move its own flash.
+
+		AIM_MAX_PITCH_DEG only applies when the yaw cone above is non-zero, i.e. when
+		players can aim at all. Damage, ammo, cooldown and every hit are server-decided
+		either way: the client contributes a flash position, never an outcome. ]]
 	AIM_MAX_PITCH_DEG = 50,
 	MAX_MUZZLE_OFFSET = 30, -- studs a claimed muzzle may sit from its own hull centre
+	--[[ There WAS a touch/gamepad aim assist here (ASSIST_CONE_DEG / ASSIST_RANGE /
+		ASSIST_CONVERGE): with shots leaving a roof barrel on a flat line, a phone
+		player could not have hit anything without one. It is deleted rather than
+		disabled, because forward-only fire plus a hull-height origin gives every input
+		device the same shot — you steer, and what is in front of you is what you hit.
+		Nothing reads those keys any more; git history has them if a cone ever returns. ]]
 
-	--[[ Touch and gamepad have no fine aim, so WeaponController locks their shot onto the
-		nearest car inside this cone — without it a phone player would fire from the
-		barrel along a flat line and miss everyone. Mouse players never reach it: they
-		have a real aim point under the cursor. Client-side aiming only; it picks a point
-		to shoot AT and cannot affect what the shot then hits. ]]
-	ASSIST_CONE_DEG = 22,
-	ASSIST_RANGE = 200,
-	ASSIST_CONVERGE = 90, -- with nobody in the cone, aim this far ahead at hull height
+}
+
+-- ==========================================================================
+-- AIM — THE TARGETING RETICLE drawn on the ground in front of YOUR car: two rails
+-- framing where the weapon you are holding actually reaches, and a bracket that snaps
+-- onto whatever is standing in them.
+--
+-- WHY IT EXISTS. Config.WEAPONS.AIM_MAX_YAW_DEG is 0: every weapon fires straight
+-- down the car's nose and STEERING IS AIMING. That rule is only fair if "ahead" is
+-- something you can SEE, and a roof turret that never swivels tells you nothing.
+--
+-- THE SHAPE IS THE TUTORIAL. Each weapon gets its own footprint, so you learn a
+-- weapon by looking at the floor rather than by reading its stats: the railgun is a
+-- razor line to the far wall, the flamethrower a stubby wedge you have to be on top
+-- of, the missiles a wide flare that says "you do not have to be precise". Widths are
+-- authored against the thing they describe (a blast diameter, a cone half-angle, a
+-- beam that does not scatter) — the derivation is on each entry.
+--
+-- ==========================================================================
+-- WHY EVERY LINE IS DRAWN TWICE — the one non-obvious thing in this table.
+--
+-- This started as flat Neon slabs and read as raw, and the reason turned out to be
+-- the FLOOR. ARENA.FLOOR_COLOR is 238,240,245 — very nearly white — so a glowing
+-- line (LightEmission 1) blows out to white and DISAPPEARS on it. Measured by
+-- rendering five treatments of the same line against the real floor colour and grid
+-- texture: a thin glowing line was invisible, a thin flat one was weak, and the only
+-- treatment that read cleanly was a DARK WIDER HALO with a FLAT SATURATED CORE on
+-- top. That pairing also survives the dark plateaus and the sand apron, which a
+-- single-colour line never can, because one of the two layers always contrasts.
+--
+-- So: every structural line is two Beams. LightEmission stays 0 on both — do not
+-- "make it glow", that is the exact change that broke it.
+-- ==========================================================================
+--
+-- ENTIRELY LOCAL AND ENTIRELY COSMETIC. Controllers/AimController draws it on ONE
+-- client for ONE car out of Beams on a single anchored, CanQuery=false host part. It
+-- never fires, never damages, and the server is never told it exists.
+-- Set ENABLED = false to remove it.
+--
+-- THESE LENGTHS ARE READABILITY, NOT RANGE. A railgun reaches 640 studs; a 640-stud
+-- reticle would cover a third of the arena and read as noise. Each `length` is the
+-- shortest run that still tells the truth about the weapon's REACH RELATIVE TO THE
+-- OTHERS, so the ordering (flame < cannon < gun < railgun) is what is load-bearing,
+-- not the absolute numbers. The LOCK is what tells you a shot connects.
+-- ==========================================================================
+Config.AIM = {
+	ENABLED = true,
+	FOLDER = "AimFx", -- workspace folder; created on demand
+	HOST = "AimRoot", -- the ONE part every Attachment hangs off, parked at the origin
+	-- with an identity CFrame, so an Attachment's CFrame IS its world CFrame.
+	CARS_FOLDER = "Cars", -- SpawnService's; scanned for the lock
+
+	-- ======================================================================
+	-- geometry
+	-- ======================================================================
+	--[[ Ground samples down the lane, and the ONLY raycasts this controller does: one
+		per station, shared by both rails AND the centre line, with tick positions
+		interpolated between them for free. Six is enough to follow a plateau skirt
+		without the rails visibly faceting. ]]
+	STATIONS = 6,
+	NOSE_FRACTION = 0.62, -- fraction of hull LENGTH ahead of centre the reticle starts
+	--[[ The core sits a hair above the halo so the two coplanar ribbons cannot fight
+		for depth order — without the bias they strobe against each other as you drive. ]]
+	LIFT = 0.14,
+	CORE_LIFT_BIAS = 0.04,
+	PROBE_UP = 26, -- ray starts this far above the sample, so a crest cannot be missed
+	PROBE_DOWN = 240,
+
+	-- ======================================================================
+	-- the line primitive — see the header for why there are two layers
+	-- ======================================================================
+	RAIL_WIDTH = 1.5,
+	RAIL_HALO_WIDTH = 3.6,
+	HALO_DARKEN = 0.16, -- core colour x this = halo colour, so the halo is the weapon's
+	-- own hue at near-black rather than a neutral grey that muddies it
+	THIN_WIDTH = 0.85, -- ticks, centre dots, corner turns: secondary marks, no halo
+
+	--[[ Idle is a hint you can see past; LOCK is a car standing in the reticle. The
+		contrast between the two IS the feature, so these are authored as pairs. ]]
+	CORE_TRANSPARENCY = 0.10,
+	LOCK_CORE_TRANSPARENCY = 0.0,
+	HALO_TRANSPARENCY = 0.46,
+	LOCK_HALO_TRANSPARENCY = 0.30,
+	THIN_TRANSPARENCY = 0.38,
+	LOCK_THIN_TRANSPARENCY = 0.14,
+
+	--[[ Lerp of the core colour toward white while locked. DELIBERATELY SMALL: the
+		colour IS the weapon's name, and at 0.5 a locked railgun and a locked cannon
+		were the same pale wash. The lock is read off the opacity jump, the pulse rate
+		and the bracket — the brighten is a top note, not the signal. ]]
+	LOCK_BRIGHTEN = 0.28,
+
+	-- ======================================================================
+	-- the dissolve — there is NO cap bar at the far end
+	-- ======================================================================
+	--[[ Rails hold full opacity to this fraction and then ramp to nothing, so the
+		reticle ends by running out rather than by hitting a wall. The hard bar the
+		first version drew was the single most "decal" thing about it. RANGE_MARK sits
+		exactly here: it is the last solid thing you see, so it reads as the effective
+		range without needing a line across the mouth. ]]
+	FADE_START = 0.58,
+
+	-- ======================================================================
+	-- instrument marks — sparse on purpose. A targeting display is mostly empty.
+	-- ======================================================================
+	TICKS = { 0.30 }, -- lane fractions carrying a short inward tick off each rail
+	TICK_LENGTH = 0.30, -- ...as a fraction of the local HALF-width
+	RANGE_MARK_LENGTH = 0.55, -- the longer pair at FADE_START
+	CORNER_LENGTH = 0.42, -- the inward turn at the near end, fraction of near half-width
+	CENTRE_DOTS = 4, -- dotted centre line: where the shot itself goes
+	CENTRE_DOT_FRACTION = 0.42, -- fraction of each dot's slot that is dot, rest is gap
+
+	-- ======================================================================
+	-- the target bracket — four corners that snap around a locked car
+	-- ======================================================================
+	BRACKET_PAD = 3.0, -- studs outside the target's hull footprint
+	BRACKET_ARM = 0.34, -- fraction of each half-extent one arm of the L covers
+	BRACKET_WIDTH = 1.6,
+	BRACKET_HALO_WIDTH = 3.4,
+	--[[ The corners start this much further out and cinch in as the lock lands. It is
+		the whole difference between a bracket that APPEARS and one that ACQUIRES. ]]
+	BRACKET_POP = 1.9,
+	ACQUIRE_RATE = 16,
+
+	-- ======================================================================
+	-- motion — all manual exp damping, no TweenService (house rule)
+	-- ======================================================================
+	FADE_RATE = 14, -- picking a weapon up / running it dry
+	LOCK_RATE = 22, -- faster: a lock has to land on the beat you line the shot up
+	FLASH_DECAY = 5.5, -- the one-shot tick flash when a lock is first acquired
+	FLASH_BOOST = 0.5, -- how much opacity that flash adds at full
+
+	-- One sine at two speeds. The change of RATE is what you read, not the amplitude.
+	IDLE_PULSE_HZ = 1.1,
+	IDLE_PULSE = 0.06,
+	LOCK_PULSE_HZ = 5.5,
+	LOCK_PULSE = 0.1,
+
+	-- ======================================================================
+	-- the lock test
+	-- ======================================================================
+	--[[ Point-in-shape against every other car's hull centre, padded by roughly half a
+		car so a target straddling the edge still counts — the reticle is a promise
+		about a SHOT, and a shot has a body to hit. ]]
+	LOCK_PAD = 5,
+	MAX_CARS_SCANNED = 16, -- a full round is 12; this is the runaway-spawn backstop
+
+	--[[ Hard ceilings on instances. A full lane is 24 rail + 2 tick + 2 range + 2
+		corner + 4 centre = 34, plus 16 for the bracket = 50. Past the cap a line is
+		simply skipped, which is a far better failure than allocating every frame. ]]
+	MAX_BEAMS = 64,
+	RING_STATIONS = 12, -- for a `ring` shape, which has no lane to divide
+
+	--[[ Anything held that is not listed below still gets a reticle. A weapon with no
+		footprint would read as broken next to five that have one. ]]
+	DEFAULT = { length = 130, near = 12, far = 20 },
+
+	SHAPES = {
+		--[[ PLASMA GUN. `spread` is 0 and must stay 0 (see POWERUPS.GUN), so the rails
+			run parallel and barely wider than a car — a beam that does not scatter
+			either hits what is between them or misses. ]]
+		GUN = { length = 150, near = 10, far = 10 },
+
+		--[[ RAILGUN. The longest run in the game and the narrowest: it reaches 640 and
+			deletes whatever it finds, so this is a sight line, not an area. You line a
+			car up between the rails during the 1.15s wind-up — that IS the weapon. ]]
+		RAILGUN = { length = 280, near = 6, far = 6 },
+
+		--[[ CANNON. The rails splay out to its own blast: `far` is 2 x blastRadius (22),
+			so the mouth is literally the crater the shell makes. Being a car-width off
+			still hits, and the flare is what says so. ]]
+		CANNON = { length = 130, near = 14, far = 44 },
+
+		--[[ MISSILES. The widest flare by far, and deliberately: the shell HOMES inside
+			a 55-degree cone, so precision is not what this weapon asks for. Rails that
+			obviously cover more than you could aim at are the honest picture of that. ]]
+		ROCKET = { length = 170, near = 18, far = 78 },
+
+		--[[ FLAMETHROWER. The one shape drawn to true scale, because its whole character
+			is that it is SHORT: length is the def's range (62) exactly, and `far` is
+			2 x range x tan(coneDeg 26) = ~60, the real mouth of the cone. It looks like
+			a weapon you have to tailgate with, which is what it is. ]]
+		FLAME = { length = 62, near = 10, far = 60 },
+
+		--[[ TWIN GUNS. The plasma gun's lane, shorter and splayed: `far` is
+			2 x length x tan(spread 3.4 deg) = ~17, so the mouth is the real scatter at
+			the far end of the drawn run. It reads as "the same gun, but you have to be
+			closer", which is exactly the trade. ]]
+		DUALGUN = { length = 140, near = 10, far = 24 },
+
+		--[[ MORTAR. Out-reaches the cannon and lands in a bigger hole, so it is drawn
+			longer and wider than the cannon on both counts: `far` is 2 x blastRadius
+			(30) — the crater, again — and the length says "further than the cannon,
+			nowhere near the railgun". The shell ARCS onto the spot, so the rails are a
+			statement of reach, not of the flight path; the ring FxController paints on
+			the landing spot is what tells you where it actually comes down. ]]
+		MORTAR = { length = 190, near = 14, far = 60 },
+
+		--[[ The three defined-but-unrolled powerups (see PowerupDefs.ORDER). They cost
+			nothing while nothing rolls them, and putting an id back in that list must
+			never leave a weapon as the only one with no reticle. ]]
+		MINE = { length = 30, near = 16, far = 16, behind = true }, -- it drops out the BACK
+		FREEZE = { length = 120, near = 12, far = 28 }, -- far = 2 x blastRadius 14
+		ZAP = { ring = 46 }, -- an aoe centred on you: a ring, not a lane
+	},
 }
 
 -- ==========================================================================
@@ -1454,7 +1815,12 @@ Config.PICKUPS = {
 		color = Color3.fromRGB(255, 205, 110),
 		respawnDelay = 0,
 	},
-	COIN = {
+	--[[ The ground pickup is a floating BANKNOTE, not a coin: PickupService skins a thin
+		panel with the same cash-bundle art the shop and the HUD counter use, so what you
+		drive over and what ticks up on the rail are visibly the one currency. `color` is
+		the edge/glow tint behind that art, which is why it is cash green rather than the
+		crown's gold — the two pickups must never be mistaken for each other mid-drive. ]]
+	MONEY = {
 		value = 12,
 		maxActive = 14,
 		spawnInterval = 2.5,
@@ -1462,7 +1828,7 @@ Config.PICKUPS = {
 		bobHeight = 0.7,
 		bobSpeed = 3.0,
 		spinSpeed = 170,
-		color = Color3.fromRGB(255, 243, 194),
+		color = Color3.fromRGB(88, 204, 108),
 	},
 	CRATE = {
 		maxActive = 10,
@@ -1486,16 +1852,16 @@ Config.PICKUPS = {
 -- ECONOMY
 -- ==========================================================================
 Config.ECONOMY = {
-	COINS_PER_CROWN = 6,
-	COINS_PER_KILL = 25,
-	COINS_PER_PLACEMENT = { 300, 180, 120, 80 }, -- 1st..4th
-	COINS_PARTICIPATION = 40,
+	MONEY_PER_CROWN = 6,
+	MONEY_PER_KILL = 25,
+	MONEY_PER_PLACEMENT = { 300, 180, 120, 80 }, -- 1st..4th
+	MONEY_PARTICIPATION = 40,
 	GEM_DROP_CHANCE = 0.05, -- per crown banked
 	GEM_DROP_AMOUNT = 1,
 	--[[ Modes that place on POINTS (juggernaut, elimination) bank no crowns at all,
 		so without this their whole payout would be kills + placement. Priced between
 		a crown and a kill: a juggernaut takedown (6 points) is worth about a kill. ]]
-	COINS_PER_POINT = 18,
+	MONEY_PER_POINT = 18,
 }
 
 -- ==========================================================================
@@ -1505,13 +1871,13 @@ Config.ECONOMY = {
 -- ==========================================================================
 Config.DAILY = {
 	MISS_GRACE_DAYS = 1, -- a gap of 1 or 2 UTC days keeps the streak; 3+ restarts at day 1
-	SPIN_COINS = 400, -- what one banked spin pays while MonetizationService.addSpins is absent
+	SPIN_MONEY = 400, -- what one banked spin pays while MonetizationService.addSpins is absent
 	CAR_OWNED_GEMS = 20, -- day 7 payout once that car is already owned
 	REWARDS = {
-		{ day = 1, kind = "coins", amount = 250, label = "+250 Coins" },
-		{ day = 2, kind = "coins", amount = 500, label = "+500 Coins" },
+		{ day = 1, kind = "money", amount = 250, label = "+250 Money" },
+		{ day = 2, kind = "money", amount = 500, label = "+500 Money" },
 		{ day = 3, kind = "gems", amount = 5, label = "+5 Gems" },
-		{ day = 4, kind = "coins", amount = 1000, label = "+1,000 Coins" },
+		{ day = 4, kind = "money", amount = 1000, label = "+1,000 Money" },
 		{ day = 5, kind = "spins", amount = 3, label = "+3 Spins" },
 		{ day = 6, kind = "gems", amount = 15, label = "+15 Gems" },
 		{ day = 7, kind = "car", carId = "blacksuv", label = "Black SUV" },
@@ -1550,7 +1916,25 @@ Config.UI = {
 	CARD_CORNER = 12,
 	BUTTON_CORNER = 10,
 	STROKE = 2.5,
-	DISPLAY_ORDER = { HUD = 5, LOBBY = 6, LUCKY = 12, DEATH = 20, RESULTS = 30, GARAGE = 40, NOTIF = 10000 },
+	DISPLAY_ORDER = { HUD = 5, LOBBY = 6, LUCKY = 12, BOUNTY = 13, DEATH = 20, RESULTS = 30, GARAGE = 40, NOTIF = 10000 },
+}
+
+--[[ ART — image ids that more than one place has to agree on.
+
+	MONEY especially: the rail counter, the wallet chips, the shop packs, the daily card
+	and the thing you drive over on the arena floor are ONE currency, and a player only
+	learns that if they are literally one drawing. Every id here is already in the place
+	(they ship with the Alternate kit's cash rows), so nothing new has to be uploaded or
+	moderated. Anything used in exactly one module still belongs in that module. ]]
+Config.ART = {
+	MONEY = "rbxassetid://76420323803161", -- banded cash bundle: THE currency mark
+	--[[ The three pack tiers, in the SAME order the kit's own Store.Cash columns draw them
+		(column1.1 / column1.2 / column2.1). Keeping catalog art and authored art identical
+		is why the shop can restore the kit's rows instead of regenerating them. ]]
+	MONEY_WALLET = "rbxassetid://84369068204476", -- small pack
+	MONEY_BAG = "rbxassetid://107981444977206", -- medium pack
+	MONEY_PILE = "rbxassetid://123388541068357", -- large pack
+	MONEY_BUNDLE = "rbxassetid://100008386147111", -- outline-free bundle, the 2x Money pass
 }
 
 -- ==========================================================================
@@ -1571,14 +1955,14 @@ Config.UI = {
 	  * Nothing here is needed to play or to win a round. Boosts affect EARN RATE, never
 	    lives, damage or in-match car stats.
 	  * FAIRNESS FLAG: there is deliberately NO crown multiplier. Crowns are the competitive
-	    score and selling score makes the leaderboard pay-to-win. Coins are progression and
-	    are safe to multiply. Please do not "complete the set" by adding one.
+	    score and selling score makes the leaderboard pay-to-win. Money is progression and
+	    is safe to multiply. Please do not "complete the set" by adding one.
 ]]
 Config.MONETIZATION = {
-	VIP_COIN_MULTIPLIER = 1.5,
-	DOUBLE_COIN_MULTIPLIER = 2,
-	PREMIUM_COIN_MULTIPLIER = 1.25, -- Roblox Premium, stacks on top
-	MAX_TOTAL_COIN_MULTIPLIER = 6, -- ceiling so stacked perks cannot break the economy
+	VIP_MONEY_MULTIPLIER = 1.5,
+	DOUBLE_MONEY_MULTIPLIER = 2,
+	PREMIUM_MONEY_MULTIPLIER = 1.25, -- Roblox Premium, stacks on top
+	MAX_TOTAL_MONEY_MULTIPLIER = 6, -- ceiling so stacked perks cannot break the economy
 	VIP_EXTRA_LIFE = 1, -- the one non-cosmetic perk, kept deliberately small
 	FREE_GEMS_GROUP = 25, -- one-time, for joining the group
 	FREE_SPINS_FAVOURITE = 3, -- one-time, for favouriting the game
@@ -1592,9 +1976,13 @@ Config.PRODUCTS = {
 	GEMS_XL = { id = 0, name = "Truck of Gems", grant = "gems", amount = 1800, robux = 599, icon = "gem", tag = "BEST VALUE" },
 	GEMS_XXL = { id = 0, name = "Mountain of Gems", grant = "gems", amount = 5000, robux = 1499, icon = "gem" },
 
-	COINS_S = { id = 0, name = "Coin Pouch", grant = "coins", amount = 2500, robux = 29, icon = "coin" },
-	COINS_M = { id = 0, name = "Coin Chest", grant = "coins", amount = 12000, robux = 99, icon = "coin" },
-	COINS_L = { id = 0, name = "Coin Vault", grant = "coins", amount = 40000, robux = 249, icon = "coin", tag = "BEST VALUE" },
+	--[[ The three money packs each have their OWN kit art (wallet -> bag -> pile), so the
+		ladder is legible before a single number is read. The `icon` names map to
+		ShopUI.ICONS; a pack that reused one image for all three would make the tiers look
+		identical at a glance and put all the work on the price. ]]
+	MONEY_S = { id = 0, name = "Wallet of Money", grant = "money", amount = 2500, robux = 29, icon = "moneyWallet" },
+	MONEY_M = { id = 0, name = "Bag of Money", grant = "money", amount = 12000, robux = 99, icon = "moneyBag" },
+	MONEY_L = { id = 0, name = "Pile of Money", grant = "money", amount = 40000, robux = 249, icon = "moneyPile", tag = "BEST VALUE" },
 
 	SPINS_5 = { id = 0, name = "5 Lucky Spins", grant = "spins", amount = 5, robux = 49, icon = "spin" },
 	SPINS_25 = { id = 0, name = "25 Lucky Spins", grant = "spins", amount = 25, robux = 199, icon = "spin" },
@@ -1603,13 +1991,13 @@ Config.PRODUCTS = {
 }
 
 Config.PASSES = {
-	DOUBLE_COINS = { id = 0, name = "2x Coins", perk = "doubleCoins", robux = 199, icon = "coin",
-		blurb = "Earn double coins forever!" },
+	DOUBLE_MONEY = { id = 0, name = "2x Money", perk = "doubleMoney", robux = 199, icon = "money",
+		blurb = "Earn double money forever!" },
 	VIP = { id = 0, name = "VIP", perk = "vip", robux = 399, icon = "crown",
-		blurb = "1.5x coins, an extra life, VIP car." },
+		blurb = "1.5x money, an extra life, VIP car." },
 	STARTER_PACK = { id = 0, name = "Starter Pack", perk = "starterPack", robux = 99, icon = "gift",
-		blurb = "10,000 coins and the Police Car.", onceOnly = true,
-		grantCoins = 10000, grantCar = "police" },
+		blurb = "10,000 money and the Police Car.", onceOnly = true,
+		grantMoney = 10000, grantCar = "police" },
 	CROWN_MAGNET = { id = 0, name = "Crown Magnet", perk = "magnet", robux = 149, icon = "magnet",
 		blurb = "Crowns fly to you from further away." },
 	GOLDEN_CAR = { id = 0, name = "Golden Car", perk = "goldenCar", robux = 299, icon = "car",
@@ -1621,13 +2009,13 @@ Config.PASSES = {
 Config.SHOP = {
 	TABS = {
 		{ key = "GEMS", label = "Gems", source = "PRODUCTS", filter = "gems" },
-		{ key = "COINS", label = "Coins", source = "PRODUCTS", filter = "coins" },
+		{ key = "MONEY", label = "Money", source = "PRODUCTS", filter = "money" },
 		{ key = "PASSES", label = "Perks", source = "PASSES" },
 		{ key = "CARS", label = "Cars", source = "CARS" },
 		{ key = "LIMITED", label = "Limited", source = "LIMITED" },
 	},
 	LIMITED_ROTATION_SECONDS = 86400,
-	LIMITED_POOL = { "GEMS_M", "COINS_M", "SPINS_25", "STARTER_PACK" },
+	LIMITED_POOL = { "GEMS_M", "MONEY_M", "SPINS_25", "STARTER_PACK" },
 	LIMITED_DISCOUNT = 0.25,
 }
 
@@ -1641,7 +2029,7 @@ Config.TEST = {
 		side by side in one table and MatchState is the only thing that picks between
 		them -- there is no second place to keep in sync. ]]
 	GRANT_ALL_CARS = false,
-	START_COINS = 0,
+	START_MONEY = 0,
 
 	--[[ Lucky blocks are deliberately rare in production: 5 blocks, 55 studs apart, in a
 		420-stud arena. Across a 40-second solo Studio match that is very nearly impossible to

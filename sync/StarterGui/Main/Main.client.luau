@@ -60,6 +60,8 @@ local ORDER = {
 	-- HUD first (always on), then overlays, then the kit-art windows.
 	"HudUI",
 	"LuckyUI",
+	-- Bounty mode's target roller + the mark chip. Inert in every other mode.
+	"BountyUI",
 	"LobbyUI",
 	"DeathUI",
 	"ResultsUI",

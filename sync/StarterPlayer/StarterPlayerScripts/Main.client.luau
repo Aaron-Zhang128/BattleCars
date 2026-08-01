@@ -23,6 +23,8 @@
 		FxController      shake passthrough not required; owns WeaponFx rendering
 		TurretController  getMuzzleWorld() noteFired(powerupId, dir) — the car-mounted
 		                  weapon models and their firing animation. Cosmetic and LOCAL.
+		AimController     (no public surface) — the AIM BOX on the ground in front of
+		                  your own car. Cosmetic, LOCAL, and reads no sibling but Chassis.
 		WeaponViewController  toggle() isShown() — the /weaponview mount overlay. Dev only
 		                  (Studio or place owner), local, and touches no sibling.
 ]]
@@ -53,6 +55,9 @@ local ORDER = {
 	-- After ChassisController/CameraController (it reads both) and after FxController,
 	-- which owns the muzzle flashes it fires alongside.
 	"TurretController",
+	-- The aim box on the floor. After TurretController so the two halves of "where is
+	-- this weapon pointing" — the barrel and the bracket under it — come up together.
+	"AimController",
 	-- The engine note under every car. Cosmetic, local, and lazily resolved, so it is
 	-- last among the drivers of feel and depends on nothing that follows.
 	"EngineController",

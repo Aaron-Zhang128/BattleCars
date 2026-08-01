@@ -56,6 +56,16 @@ WeaponRig.MUZZLE2 = "Muzzle2" -- optional twin barrel; poses exactly like Muzzle
 WeaponRig.AMMO = "Ammo"
 
 local RIG = Config.WEAPON_RIG
+
+--[[ The engine clamps a part below this and the clamp is visible as a pop, so the
+	collapse stops here and the caller destroys the rig on the same frame. ]]
+local MIN_SCALE = 0.02
+
+--[[ Stamped on a folder whose rig is shrinking away. It is what lets the NEXT weapon
+	mount while the last one is still collapsing -- build() may clear a stale folder, but
+	it must never cut short one that is mid-animation, which is exactly what a crate
+	swap does (drop then build, in the same frame). ]]
+WeaponRig.RETIRING_ATTR = "Retiring"
 local RIGS = Config.WEAPON_RIGS
 
 -- Jitter frequencies for the two-sine judder while a weapon is firing. Coprime-ish
@@ -118,9 +128,15 @@ function WeaponRig.source(powerupId: string): Model?
 	return model
 end
 
---[[ A fresh copy of the missile mesh, centred on its own origin with the nose along
-	-Z. FxController welds this onto the server's (invisible) shell so the thing you
-	watch fly is the model rather than a neon box. Returns nil for every other id. ]]
+--[[ A fresh copy of the missile mesh. FxController welds this onto the server's
+	(invisible) shell so the thing you watch fly is the model rather than a neon box.
+	Returns nil for every other id.
+
+	THE CLONE CARRIES ITS OWN STORED ROTATION and the caller must respect it: like
+	every part in these rigs the mesh is authored facing +X with the normaliser's 90 deg
+	yaw baked into its CFrame, so `shellCFrame * clone.CFrame.Rotation` is the pose that
+	puts the nose along travel. Overwriting the clone's CFrame outright flies it
+	sideways-on. ]]
 function WeaponRig.ammoClone(powerupId: string): BasePart?
 	local model = WeaponRig.source(powerupId)
 	local ammo = model and model:FindFirstChild(WeaponRig.AMMO)
@@ -168,25 +184,34 @@ function WeaponRig.build(car: Model, powerupId: string)
 		return nil
 	end
 
-	-- One folder per car, replaced rather than stacked, so a fast crate swap can never
-	-- leave two guns on one roof.
-	local existing = car:FindFirstChild(WeaponRig.LOCAL_FOLDER)
-	if existing then
-		existing:Destroy()
+	--[[ One LIVE folder per car, so a fast crate swap can never leave two guns on one
+		roof -- but a RETIRING one is left exactly where it is. That folder belongs to a
+		rig that is still shrinking and still being posed, and its own sweep destroys it
+		when the collapse finishes; killing it here is what made a weapon swap snap the
+		old model out of existence instead of playing it away. Duplicate sibling names
+		are legal and nothing looks either folder up by name -- every consumer holds the
+		direct reference build handed it. ]]
+	for _, child in ipairs(car:GetChildren()) do
+		if child.Name == WeaponRig.LOCAL_FOLDER and child:GetAttribute(WeaponRig.RETIRING_ATTR) ~= true then
+			child:Destroy()
+		end
 	end
 	local folder = Instance.new("Folder")
 	folder.Name = WeaponRig.LOCAL_FOLDER
 
-	local parts, rest = {}, {}
+	local parts, rest, baseSize = {}, {}, {}
 	for _, role in ipairs({ WeaponRig.BASE, WeaponRig.TURRET, WeaponRig.MUZZLE, WeaponRig.MUZZLE2 }) do
 		local template = source:FindFirstChild(role)
 		if template and template:IsA("BasePart") then
 			local part = template:Clone()
 			prep(part)
+			-- Built at the popped-DOWN size; step() grows it over MOUNT_GROW_TIME.
+			part.Size = template.Size * RIG.MOUNT_START_SCALE
 			part.Parent = folder
 			parts[role] = part
 			-- The asset's own CFrame IS its rig-local rest pose (see the asset contract).
 			rest[role] = template.CFrame
+			baseSize[role] = template.Size
 		end
 	end
 
@@ -225,6 +250,16 @@ function WeaponRig.build(car: Model, powerupId: string)
 		recoilsTurret = recoilsTurret,
 		spinPivots = spinPivots,
 
+		--[[ MOUNT ANIMATION. `scale` multiplies both every part's Size and its rest
+			OFFSET from the mount, which is what makes the rig grow out of the roofline
+			instead of inflating through it. baseSize is captured here because Size is
+			what the animation writes -- re-deriving it from a mid-animation part would
+			ratchet the rig smaller every frame. ]]
+		baseSize = baseSize,
+		scale = RIG.MOUNT_START_SCALE,
+		growT = 0, -- 0..1 through the pop-in
+		shrinkT = nil, -- non-nil once beginRemove has been called
+
 		yaw = 0, -- current turret yaw, radians, relative to the car's nose
 		aimYaw = 0, -- where it is slewing to
 		kick = 0, -- 0..1 recoil amount, jumps to 1 on fire and decays
@@ -233,6 +268,20 @@ function WeaponRig.build(car: Model, powerupId: string)
 		spinRate = 0, -- radians/sec
 		firingUntil = 0, -- os.clock() the "still firing" pose expires
 	}
+end
+
+--[[ Starts the shrink-away. The rig keeps stepping and posing while it collapses, so
+	it stays glued to a car that is still driving; step() returns false on the frame it
+	is done and the CALLER destroys it then. Idempotent -- calling it twice does not
+	restart the collapse. ]]
+function WeaponRig.beginRemove(rig)
+	if rig and not rig.shrinkT then
+		rig.shrinkT = 0
+		if rig.folder and rig.folder.Parent then
+			-- ...so the next build() knows to leave this one alone. See build().
+			rig.folder:SetAttribute(WeaponRig.RETIRING_ATTR, true)
+		end
+	end
 end
 
 function WeaponRig.destroy(rig)
@@ -307,7 +356,9 @@ function WeaponRig.muzzleWorld(rig): Vector3?
 	if spread and spread > 0 then
 		point += Vector3.new(((rig.shots or 0) % 2 == 0) and -spread or spread, 0, 0)
 	end
-	return (mountCF * CFrame.Angles(0, rig.yaw, 0)):PointToWorldSpace(point)
+	-- Scaled with the rig: fire during the third of a second it is growing and the
+	-- flash still comes out of where the barrel actually is.
+	return (mountCF * CFrame.Angles(0, rig.yaw, 0)):PointToWorldSpace(point * (rig.scale or 1))
 end
 
 -- ==========================================================================
@@ -328,6 +379,32 @@ function WeaponRig.step(rig, dt: number, now: number)
 
 	local def = rig.def
 	local firing = now < rig.firingUntil
+
+	--[=[ ---- mount animation ----
+		Grow uses the house back-out overshoot -- the same curve as every UI card pop,
+		which is what makes a turret arriving feel like part of the same game as the
+		window that told you about it. Shrink is a plain accelerating collapse.
+
+		A rig that has finished shrinking returns false, exactly like a rig whose car
+		has gone: the caller's one "step said no" branch destroys both. ]=]
+	if rig.shrinkT then
+		rig.shrinkT = math.min(1, rig.shrinkT + dt / math.max(RIG.MOUNT_SHRINK_TIME, 1e-3))
+		if rig.shrinkT >= 1 then
+			return false
+		end
+		rig.scale = math.max((1 - rig.shrinkT) ^ 1.8, MIN_SCALE)
+	elseif rig.growT < 1 then
+		rig.growT = math.min(1, rig.growT + dt / math.max(RIG.MOUNT_GROW_TIME, 1e-3))
+		local k = rig.growT - 1
+		local over = RIG.MOUNT_OVERSHOOT or 0
+		-- back-out: (1 + c3 k^3 + c1 k^2) with c1 tuned by the overshoot dial
+		local c1 = over * 10.1
+		local eased = 1 + (c1 + 1) * k * k * k + c1 * k * k
+		rig.scale = RIG.MOUNT_START_SCALE + (1 - RIG.MOUNT_START_SCALE) * eased
+	else
+		rig.scale = 1
+	end
+	local scale = rig.scale
 
 	--[=[ yaw: slew toward the aim at a fixed deg/s and never snap. setAim already
 		parks aimYaw at 0 when there is no aim to follow, so "return to centre" is
@@ -373,15 +450,35 @@ function WeaponRig.step(rig, dt: number, now: number)
 		shakeCF = CFrame.new(jx, jy, 0)
 	end
 
-	local parts, rest = rig.parts, rig.rest
-	if parts[WeaponRig.BASE] then
-		parts[WeaponRig.BASE].CFrame = mountCF * rest[WeaponRig.BASE]
+	--[[ Every pose goes through this so the animation is applied in ONE place: the rest
+		OFFSET scales (the rig grows out of the mount) and so does the part's Size. At
+		scale 1 it is bit-identical to `poseCF * rest`. ]]
+	local parts, rest, baseSize = rig.parts, rig.rest, rig.baseSize
+	local function place(role: string, poseCF: CFrame)
+		local part = parts[role]
+		if not part then
+			return
+		end
+		local restCF = rest[role]
+		if scale ~= 1 then
+			part.Size = baseSize[role] * scale
+			part.CFrame = poseCF * CFrame.new(restCF.Position * scale) * restCF.Rotation
+		else
+			--[[ The frame the pop LANDS on still has to put the authored size back: the
+				previous frame wrote a scaled one and the branch above is skipped from
+				here on, so without this a rig lives out its life a few percent off. The
+				compare makes it a one-frame write rather than a per-frame one. ]]
+			if part.Size ~= baseSize[role] then
+				part.Size = baseSize[role]
+			end
+			part.CFrame = poseCF * restCF
+		end
 	end
 
+	place(WeaponRig.BASE, mountCF)
+
 	local turretBase = rig.recoilsTurret and (turretCF * recoilCF * shakeCF) or turretCF
-	if parts[WeaponRig.TURRET] then
-		parts[WeaponRig.TURRET].CFrame = turretBase * rest[WeaponRig.TURRET]
-	end
+	place(WeaponRig.TURRET, turretBase)
 
 	--[=[ Every barrel poses off the SAME base. A Turret recoil has already moved that
 		base (turret and barrel are one assembly); a Muzzle recoil moves the barrels
@@ -391,14 +488,15 @@ function WeaponRig.step(rig, dt: number, now: number)
 		muzzleBase = turretCF * recoilCF * shakeCF
 	end
 	for _, role in ipairs({ WeaponRig.MUZZLE, WeaponRig.MUZZLE2 }) do
-		local part = parts[role]
-		if part then
+		if parts[role] then
 			local poseCF = muzzleBase
 			local pivot = rig.spinPivots and rig.spinPivots[role]
 			if rig.spin ~= 0 and pivot then
-				poseCF = poseCF * CFrame.new(pivot) * CFrame.Angles(0, 0, rig.spin) * CFrame.new(-pivot)
+				-- the pivot is a rig-space offset, so it scales with everything else
+				local p = pivot * scale
+				poseCF = poseCF * CFrame.new(p) * CFrame.Angles(0, 0, rig.spin) * CFrame.new(-p)
 			end
-			part.CFrame = poseCF * rest[role]
+			place(role, poseCF)
 		end
 	end
 

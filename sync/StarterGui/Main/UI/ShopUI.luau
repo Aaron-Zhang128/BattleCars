@@ -26,8 +26,8 @@
 	            The kit ScreenGui is an art library: nothing inside it is modified or shown.
 	Remote      Monetization  C->S ("product"|"pass", key)
 	                          S->C (kind, payload) kind = granted|owned|failed|limited
-	Attributes  reads only: Coins Gems Vip DoubleCoins Magnet GoldenCar Spins
-	            CoinMultiplier OwnedCars EquippedCar ProfileLoaded
+	Attributes  reads only: Money Gems Vip DoubleMoney Magnet GoldenCar Spins
+	            MoneyMultiplier OwnedCars EquippedCar ProfileLoaded
 	Assets      ReplicatedStorage.CrashCore.Assets.Previews[carId] — real renders for the
 	            car row (house rule: game imagery is the actual model, never drawn art)
 
@@ -65,6 +65,7 @@ local ShopUI = {}
 
 local ATTR = Config.ATTR
 local UI = Config.UI
+local ART = Config.ART
 
 -- ==========================================================================
 -- §1) constants
@@ -85,11 +86,11 @@ local KIT_TIMEOUT = 5 -- PlayerGui clones both ScreenGuis together; this is a sa
 	paste-ready block. Named once here so no bare string is scattered through the file. ]]
 local MON_ATTR = {
 	VIP = "Vip",
-	DOUBLE_COINS = "DoubleCoins",
+	DOUBLE_MONEY = "DoubleMoney",
 	MAGNET = "Magnet",
 	GOLDEN_CAR = "GoldenCar",
 	SPINS = "Spins",
-	COIN_MULTIPLIER = "CoinMultiplier",
+	MONEY_MULTIPLIER = "MoneyMultiplier",
 }
 
 --[[ perk name (Config.PASSES[*].perk) -> the attribute mirroring it. Driven by perk, not
@@ -97,22 +98,22 @@ local MON_ATTR = {
 	one-time grant, not a standing perk, and nothing replicates it. See HANDOFF. ]]
 local PERK_ATTR = {
 	vip = MON_ATTR.VIP,
-	doubleCoins = MON_ATTR.DOUBLE_COINS,
+	doubleMoney = MON_ATTR.DOUBLE_MONEY,
 	magnet = MON_ATTR.MAGNET,
 	goldenCar = MON_ATTR.GOLDEN_CAR,
 }
 
 -- A change here means a grant may have landed: repaint, and answer a purchase in flight.
 local GRANT_ATTR = {
-	ATTR.COINS,
+	ATTR.MONEY,
 	ATTR.GEMS,
 	ATTR.OWNED,
 	MON_ATTR.VIP,
-	MON_ATTR.DOUBLE_COINS,
+	MON_ATTR.DOUBLE_MONEY,
 	MON_ATTR.MAGNET,
 	MON_ATTR.GOLDEN_CAR,
 	MON_ATTR.SPINS,
-	MON_ATTR.COIN_MULTIPLIER,
+	MON_ATTR.MONEY_MULTIPLIER,
 }
 
 -- A change here only repaints. Equipping a car must never sound like a purchase.
@@ -125,18 +126,27 @@ local REFRESH_ATTR = { ATTR.EQUIPPED }
 	unmapped falls back to the kit's neutral chip tinted with the row accent — a deliberate
 	coloured tile rather than a guessed object. ]]
 local IMG = {
-	CASH = "rbxassetid://76420323803161",
+	CASH = ART.MONEY, -- the currency mark; shared with the rail counter and the arena pickup
+	WALLET = ART.MONEY_WALLET,
+	MONEYBAG = ART.MONEY_BAG,
+	PILE = ART.MONEY_PILE,
 	ROBUX = "rbxassetid://115923778456233",
 	CHIP = "rbxassetid://71150462109394",
 	CROWN = "rbxassetid://98284918132985", -- kit VIP banner icon
-	MULTIPLIER = "rbxassetid://100008386147111", -- kit "2x Cash" pass icon
+	MULTIPLIER = ART.MONEY_BUNDLE, -- kit "2x Cash" pass icon
 	BOX = "rbxassetid://83666594802115", -- kit reward-box icon
 	SPIN = "rbxassetid://112399300086939", -- kit lucky-block icon
 }
 
--- Config `icon` name -> { image, tint }. Unmapped names fall through to the neutral chip.
+--[[ Config `icon` name -> { image, tint }. Unmapped names fall through to the neutral chip.
+	The three money packs each draw their own tier art (wallet -> bag -> vault) while plain
+	`money` stays the bundle, so a pack reads as MORE of the thing the counter shows rather
+	than as a different currency. ]]
 local ICONS = {
-	coin = { image = IMG.MULTIPLIER },
+	money = { image = IMG.CASH },
+	moneyWallet = { image = IMG.WALLET },
+	moneyBag = { image = IMG.MONEYBAG },
+	moneyPile = { image = IMG.PILE },
 	gem = { image = IMG.CASH, tint = UI.RARITY.EPIC },
 	crown = { image = IMG.CROWN },
 	gift = { image = IMG.BOX },
@@ -146,13 +156,13 @@ local ICONS = {
 -- Row accents. Drive the card sheen, the starburst and the price ramp.
 local GRANT_ACCENT = {
 	gems = UI.RARITY.EPIC,
-	coins = UI.GOLD,
+	money = UI.CONFIRM, -- cash green, to match the art; gold now belongs to crowns alone
 	spins = UI.RARITY.RARE,
 	extraLife = UI.DANGER,
 }
 local PERK_ACCENT = {
 	vip = UI.GOLD,
-	doubleCoins = UI.LIME,
+	doubleMoney = UI.LIME,
 	magnet = UI.RARITY.RARE,
 	goldenCar = UI.RARITY.LEGENDARY,
 	starterPack = UI.CONFIRM,
@@ -161,7 +171,7 @@ local PERK_ACCENT = {
 -- Kid words for what a product actually hands over.
 local GRANT_WORD = {
 	gems = "Gems",
-	coins = "Coins",
+	money = "Money",
 	spins = "Spins",
 	extraLife = "Extra Life",
 }
@@ -199,7 +209,7 @@ local CARD_HOVER = 1.04 -- cards sit a hair apart; the house 1.07 would overlap
 local kit, net, frames
 local panel, container
 local confirm, confirmShade, confirmNotice, confirmTitle
-local coinValue, gemValue
+local moneyValue, gemValue
 local quickButtons = {}
 
 local TPL = {} -- kit templates, harvested before the container is cleared
@@ -455,7 +465,7 @@ end
 --[[ Repaints a kit buy button in place. The mode decides the whole button, so a state
 	change is property writes only and never a rebuild (which would restart its UIScale feel).
 	  robux  a real price, purchasable        soon   id not pasted yet, inert
-	  owned  already held, not re-purchasable money  a coin/gem price (the car row)
+	  owned  already held, not re-purchasable money  a money/gem price (the car row)
 	  free   the starter car                  busy   a request is in flight ]]
 local function paintBuy(rec, mode: string)
 	local btn = rec.buy
@@ -555,8 +565,8 @@ local function refreshAll()
 end
 
 local function refreshWallet()
-	if coinValue then
-		coinValue.Text = MathUtil.comma(readNumber(ATTR.COINS))
+	if moneyValue then
+		moneyValue.Text = MathUtil.comma(readNumber(ATTR.MONEY))
 	end
 	if gemValue then
 		gemValue.Text = MathUtil.comma(readNumber(ATTR.GEMS))
@@ -657,7 +667,7 @@ end
 
 --[[ A car: the kit's box card with a REAL viewport render where its icon was (house rule —
 	game imagery is the actual model, never drawn art). Its button is a doorway, not a till:
-	cars cost coins, and the garage owns that flow and that remote. ]]
+	cars cost money, and the garage owns that flow and that remote. ]]
 local function fillCar(card, rec)
 	setText(card, "Name", rec.car.name)
 
@@ -739,8 +749,8 @@ local function limitedRewards(source: string, def): { any }
 		})
 		return list
 	end
-	if type(def.grantCoins) == "number" and def.grantCoins > 0 then
-		table.insert(list, { icon = "coin", name = "Coins", amount = "+" .. MathUtil.comma(def.grantCoins) })
+	if type(def.grantMoney) == "number" and def.grantMoney > 0 then
+		table.insert(list, { icon = "money", name = "Money", amount = "+" .. MathUtil.comma(def.grantMoney) })
 	end
 	if type(def.grantCar) == "string" then
 		local car = CarRegistry.get(def.grantCar)
@@ -871,7 +881,7 @@ local function buildSections()
 				car = car,
 				carId = car.id,
 				price = car.price or 0,
-				currency = car.currency or "Coins",
+				currency = car.currency or "Money",
 				accent = CarRegistry.rarityColor(car),
 			})
 		end
@@ -1219,7 +1229,7 @@ local SLOTS = {
 		{ "TextFrame2", "Gamepasses" },
 		{ "TextFrame3", "Packs" },
 		{ "TextFrame4", "Lucky Spins" },
-		{ "TextFrame5", "Coins & Gems" },
+		{ "TextFrame5", "Money & Gems" },
 	},
 	-- Kit sections with no counterpart in this game. Hidden, never destroyed.
 	hide = { "ServerLuck", "LegacyPasses", "PROPack" },
@@ -1229,17 +1239,17 @@ local SLOTS = {
 		{ path = { "Exclusive" }, buy = "2", key = "GEMS_L", amount = "700" },
 		{ path = { "Exclusive" }, buy = "3", key = "GEMS_XL", amount = "1.8K" },
 		{ path = { "CelestialBull" }, buy = "1", key = "GOLDEN_CAR", name = "Golden Car", car = "supercar" },
-		{ path = { "VIP" }, buy = "1", key = "VIP", name = "VIP", desc = "More coins, and everyone sees it." },
+		{ path = { "VIP" }, buy = "1", key = "VIP", name = "VIP", desc = "More money, and everyone sees it." },
 		{ path = { "LuckyBlocks", "Secret" }, buy = "1", key = "SPINS_5", name = "5 Spins" },
 		{ path = { "LuckyBlocks", "Alien" }, buy = "1", key = "SPINS_25", name = "25 Spins" },
 		{ path = { "LuckyBlocks", "GOD" }, buy = "1", key = "EXTRA_LIFE", name = "Extra Life" },
-		{ path = { "Gamepasses", "2xCash" }, buy = "1", key = "DOUBLE_COINS", name = "2x Coins", desc = "Double every coin" },
+		{ path = { "Gamepasses", "2xCash" }, buy = "1", key = "DOUBLE_MONEY", name = "2x Money", desc = "Double all the money you earn" },
 		{ path = { "Gamepasses", "SuperLuck" }, buy = "1", key = "CROWN_MAGNET", name = "Crown Magnet", desc = "Crowns fly to you", icon = CROWN_ICON },
 		{ path = { "Gamepasses", "MEGALuck" }, hide = true },
-		{ path = { "StarterPack" }, buy = "1", key = "STARTER_PACK", name = "Starter Pack", chips = { ["2"] = { "Coins", "+10K" } } },
-		{ path = { "Cash", "column1", "1" }, buy = "1", key = "COINS_S", name = "Coin Pouch" },
-		{ path = { "Cash", "column1", "2" }, buy = "1", key = "COINS_M", name = "Coin Chest" },
-		{ path = { "Cash", "column2", "1" }, buy = "1", key = "COINS_L", name = "Coin Vault" },
+		{ path = { "StarterPack" }, buy = "1", key = "STARTER_PACK", name = "Starter Pack", chips = { ["2"] = { "Money", "+10K" } } },
+		{ path = { "Cash", "column1", "1" }, buy = "1", key = "MONEY_S", name = "Wallet of Money" },
+		{ path = { "Cash", "column1", "2" }, buy = "1", key = "MONEY_M", name = "Bag of Money" },
+		{ path = { "Cash", "column2", "1" }, buy = "1", key = "MONEY_L", name = "Pile of Money" },
 		{ path = { "Cash", "column2", "2" }, buy = "1", key = "GEMS_M", name = "Bag of Gems" },
 		{ path = { "Cash", "column3", "1" }, buy = "1", key = "GEMS_XXL", name = "Mountain of Gems" },
 	},
@@ -1518,7 +1528,7 @@ local function buildWallet()
 	layout.Padding = UDim.new(0.05, 0)
 	layout.Parent = wallet
 
-	coinValue = buildWalletSlot(wallet, "Coins", 1, nil)
+	moneyValue = buildWalletSlot(wallet, "Money", 1, nil)
 	-- Gems wear the epic purple the garage already gives them: same icon, own colour.
 	gemValue = buildWalletSlot(wallet, "Gems", 2, UI.RARITY.EPIC)
 end

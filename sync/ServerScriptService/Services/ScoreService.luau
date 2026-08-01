@@ -22,10 +22,10 @@
 		MatchEvent "kill"  -> FireAllClients { killerName = string?, victimName, crowns }
 			Fired from recordKill — that call site is the one place that knows killer,
 			victim and crowns stolen together. CombatService must NOT also fire it.
-		Notify -> FireClient(text, "gold") with each player's coin total at payout.
+		Notify -> FireClient(text, "gold") with each player's money total at payout.
 
 	SERVICES USED — resolved LAZILY through ctx.svc at call time:
-		ProfileService  isLoaded addCoins addGems noteRoundResult
+		ProfileService  isLoaded addMoney addGems noteRoundResult
 
 	INIT ORDER
 		Inited before MatchService. ProfileService is inited first but is only ever
@@ -42,7 +42,7 @@
 	PUBLIC API
 		addCrowns(player, n) -> newTotal      recordKill(killer, victim, crownsStolen)
 		addPoints(player, n) -> newTotal      resetRound()
-		getBoard() -> rows                   payoutRound() -> { [userId] = coins }
+		getBoard() -> rows                   payoutRound() -> { [userId] = money }
 ]]
 
 local Players = game:GetService("Players")
@@ -58,7 +58,7 @@ local ATTR = Config.ATTR
 local ECON = Config.ECONOMY
 
 local GEM_ROLL_CAP = 200 -- safety bound on the per-crown gem roll loop
-local NOTIFY_MOOD = "gold"
+local NOTIFY_MOOD = "green" -- the payout is MONEY; gold in this game means crowns
 
 local ScoreService = {}
 
@@ -255,9 +255,9 @@ function ScoreService.resetRound()
 	end
 end
 
---[[ Pays out the finished round and returns { [userId] = coins } for the results card.
-	coins = participation + crowns * COINS_PER_CROWN + kills * COINS_PER_KILL
-	        + COINS_PER_PLACEMENT[place] for the top 4.
+--[[ Pays out the finished round and returns { [userId] = money } for the results card.
+	money = participation + crowns * MONEY_PER_CROWN + kills * MONEY_PER_KILL
+	        + MONEY_PER_PLACEMENT[place] for the top 4.
 	Gems: one GEM_DROP_CHANCE roll per crown banked, GEM_DROP_AMOUNT each. ]]
 function ScoreService.payoutRound(): { [number]: number }
 	local board = ScoreService.getBoard()
@@ -269,15 +269,15 @@ function ScoreService.payoutRound(): { [number]: number }
 			--[[ The points term is what pays a Juggernaut or Elimination round: those
 				modes bank no crowns at all, so without it the whole payout would be
 				kills plus placement. ]]
-			local coins = ECON.COINS_PARTICIPATION
-				+ ECON.COINS_PER_CROWN * row.crowns
-				+ ECON.COINS_PER_KILL * row.kills
-				+ (ECON.COINS_PER_POINT or 0) * (row.points or 0)
-			local placementBonus = ECON.COINS_PER_PLACEMENT[place]
+			local money = ECON.MONEY_PARTICIPATION
+				+ ECON.MONEY_PER_CROWN * row.crowns
+				+ ECON.MONEY_PER_KILL * row.kills
+				+ (ECON.MONEY_PER_POINT or 0) * (row.points or 0)
+			local placementBonus = ECON.MONEY_PER_PLACEMENT[place]
 			if placementBonus then
-				coins += placementBonus
+				money += placementBonus
 			end
-			coins = math.max(0, math.floor(coins))
+			money = math.max(0, math.floor(money))
 
 			local gems = 0
 			for _ = 1, math.min(row.crowns, GEM_ROLL_CAP) do
@@ -286,13 +286,13 @@ function ScoreService.payoutRound(): { [number]: number }
 				end
 			end
 
-			payouts[player.UserId] = coins
+			payouts[player.UserId] = money
 
 			-- Refuse to bank into a profile that never loaded cleanly.
 			local _, loaded = profileCall("isLoaded", player)
 			if loaded == true then
-				if coins > 0 then
-					profileCall("addCoins", player, coins)
+				if money > 0 then
+					profileCall("addMoney", player, money)
 				end
 				if gems > 0 then
 					profileCall("addGems", player, gems)
@@ -303,8 +303,8 @@ function ScoreService.payoutRound(): { [number]: number }
 			end
 
 			-- Re-check after the ProfileService calls above (they may yield).
-			if player.Parent and notifyRemote and coins > 0 then
-				notifyRemote:FireClient(player, "+" .. MathUtil.comma(coins) .. " coins!", NOTIFY_MOOD)
+			if player.Parent and notifyRemote and money > 0 then
+				notifyRemote:FireClient(player, "+" .. MathUtil.comma(money) .. " Money!", NOTIFY_MOOD)
 			end
 		end
 	end

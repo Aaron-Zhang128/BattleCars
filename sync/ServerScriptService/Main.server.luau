@@ -16,8 +16,8 @@
 	CameraController drives the camera manually.
 
 	ATTRIBUTE OWNERSHIP (exactly one writer each, do not cross these lines):
-		ProfileService  Coins Gems EquippedCar OwnedCars BestCrowns TotalKills ProfileLoaded
-		MonetizationService Vip DoubleCoins Magnet GoldenCar Spins CoinMultiplier
+		ProfileService  Money Gems EquippedCar OwnedCars BestCrowns TotalKills ProfileLoaded
+		MonetizationService Vip DoubleMoney Magnet GoldenCar Spins MoneyMultiplier
 		SpawnService    Alive Lives (+ stamps car.Invuln once, at spawn)
 		ScoreService    Crowns Kills
 		WeaponService   PowerupSlot PowerupAmmo
@@ -79,6 +79,9 @@ local ORDER = {
 	"WeaponService",
 	"CombatService",
 	"ScoreService",
+	-- Bounty mode's contracts and prices. After ScoreService (it banks a claim through
+	-- it) and before MatchService, whose very first phase flip is what arms it.
+	"BountyService",
 	"MatchService",
 	"GarageService",
 	-- Last, and inert unless you ask for it: the "/test" weapon carousel. Gated on

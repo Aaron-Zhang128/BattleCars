@@ -12,7 +12,7 @@
 		-> GarageAction:FireClient(ok, message, carId). Ownership and balances replicate
 		through ProfileService's attributes; this service never writes an attribute itself.
 
-	ATTRIBUTES: none written here. Coins / Gems / OwnedCars / EquippedCar belong to
+	ATTRIBUTES: none written here. Money / Gems / OwnedCars / EquippedCar belong to
 	ProfileService — every mutation goes through its API.
 
 	ORDER OF OPERATIONS (money safety)
@@ -48,7 +48,7 @@ local MSG = {
 	EQUIPPED = "Equipped!",
 	NEXT_LIFE = "Next life!",
 	ALREADY_OWNED = "You already own it!",
-	NEED_COINS = "Need more coins!",
+	NEED_MONEY = "Need more money!",
 	NEED_GEMS = "Need more gems!",
 	NOT_OWNED = "Buy it first!",
 	NOT_READY = "One second...",
@@ -97,7 +97,7 @@ local function handleBuy(player: Instance, carId: string): (boolean, string)
 
 	-- Debit FIRST: never hand out a car we were not paid for.
 	if price > 0 and not Profile.spend(player, currency, price) then
-		return false, (currency == ATTR.GEMS) and MSG.NEED_GEMS or MSG.NEED_COINS
+		return false, (currency == ATTR.GEMS) and MSG.NEED_GEMS or MSG.NEED_MONEY
 	end
 
 	if not Profile.grantCar(player, carId) then
@@ -106,7 +106,7 @@ local function handleBuy(player: Instance, carId: string): (boolean, string)
 			if currency == ATTR.GEMS then
 				Profile.addGems(player, price)
 			else
-				Profile.addCoins(player, price)
+				Profile.addMoney(player, price)
 			end
 		end
 		warn(

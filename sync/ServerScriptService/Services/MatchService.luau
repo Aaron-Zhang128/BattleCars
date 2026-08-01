@@ -29,7 +29,7 @@
 	REMOTES (S->C)
 		MatchEvent "phase"   { phase = string, endsAt = number, roundId = number }
 		MatchEvent "board"   { { name, crowns, kills, userId }, ... }  top 5, ~every 2s in Match
-		MatchEvent "results" { board = { ... }, payouts = { [userId] = coins },
+		MatchEvent "results" { board = { ... }, payouts = { [userId] = money },
 		                       teams = { { index, name, color, score }, ... } | nil }
 		                     `teams` is present only in a team mode; the card draws the
 		                     head-to-head banner off it and skips it otherwise.

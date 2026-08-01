@@ -8,7 +8,7 @@
 		Main.server   -> ArenaService.init(ctx) -> ArenaService.build()
 		MatchService  : nextMap()                 rotates the map at the start of Lobby
 		SpawnService  : randomSpawn() / getSpawnPoints()   where to drop a fresh car
-		PickupService : randomGroundPoint(inset)           where to place crowns/coins/crates
+		PickupService : randomGroundPoint(inset)           where to place crowns/money/crates
 		anyone        : isInside(pos) / getFolder() / getMap()
 
 	MAPS

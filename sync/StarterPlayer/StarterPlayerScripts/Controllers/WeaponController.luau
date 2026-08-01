@@ -130,19 +130,6 @@ local function liveHull(): BasePart?
 	return hull
 end
 
--- The server contract demands a Vector3, so this always returns one.
-local function aimDirection(hull: BasePart): Vector3
-	local aim = safeCall("CameraController", "getAimDirection", nil)
-	if typeof(aim) == "Vector3" and aim.Magnitude > 1e-3 then
-		return aim.Unit
-	end
-	local look = safeCall("ChassisController", "getLook", nil)
-	if typeof(look) == "Vector3" and look.Magnitude > 1e-3 then
-		return look.Unit
-	end
-	return hull.CFrame.LookVector
-end
-
 --[[ Cosmetic muzzle point. Prefers the REAL barrel of the weapon bolted to your
 	roof — TurretController owns that model and its live yaw, so the flash leaves the
 	gun rather than the bonnet, even mid-swing. Falls back to the hull nose for the
@@ -155,22 +142,18 @@ local function muzzleOrigin(hull: BasePart): Vector3
 	return hull.CFrame:PointToWorldSpace(Vector3.new(0, FIRE.MUZZLE_UP, -hull.Size.Z * FIRE.MUZZLE_FORWARD))
 end
 
---[[ What a shot converges on.
+--[[ The firing axis: the way the windshield is facing, flattened onto the driving
+	plane. EVERY weapon fires along it and nothing the player points at can move it —
+	steering is aiming, and that is the whole rule.
 
-	With Config.WEAPONS.AIM_MAX_YAW_DEG at 0 a shot always leaves along the car's nose,
-	so the only thing left to choose is HOW FAR — and that is exactly what sets the
-	downward angle from a barrel eight studs above hull centre. Taking it from the
-	cursor's distance, as this used to, lands shots wherever the mouse happens to be
-	hovering: with the yaw discarded, a cursor near the car pitches every shot into the
-	ground a few studs ahead. Not something a player can read, let alone aim.
+	Flattened because a hover chassis pitches over every bump, and that wobble is
+	suspension rather than intent. The cursor is consulted only for yaw the weapon can
+	actually spend, so at Config.WEAPONS.AIM_MAX_YAW_DEG = 0 it is not read at all;
+	raise that key and the swivel comes back here first.
 
-	So the aim point is the nearest car ON THE FIRING AXIS — which is what actually
-	makes shots connect at any range — and a fixed convergence distance when there is
-	nothing ahead. The cursor is consulted only for yaw the weapon can really spend; at
-	a cone of 0 it is ignored entirely and steering IS aiming.
-
-	This only chooses what to point AT. The server re-derives and clamps everything, so
-	it can never turn a miss into a hit it did not earn. ]]
+	WeaponService.sanitizeAim derives this same axis from the same hull and does not
+	trust ours. Ours exists so the turret pose, the local prediction and the real shot
+	are one line rather than three. ]]
 local function firingAxis(hull: BasePart): Vector3
 	local forward = MathUtil.flatUnit(hull.CFrame.LookVector)
 	if forward == Vector3.zero then
@@ -192,43 +175,17 @@ local function firingAxis(hull: BasePart): Vector3
 	return CFrame.fromAxisAngle(Vector3.yAxis, math.rad(yaw)) * forward
 end
 
-local function aimPointFor(hull: BasePart): Vector3
-	local CFG = Config.WEAPONS
-	local axis = firingAxis(hull)
-	local ownCar = safeCall("ChassisController", "getCar", nil)
+--[[ The direction the shot travels. Deliberately not a choice: it is the car's own
+	heading, the same vector the server will derive for itself.
 
-	local best, bestDot = nil, math.cos(math.rad(CFG.ASSIST_CONE_DEG))
-	local folder = workspace:FindFirstChild(FIRE.CARS_FOLDER)
-	if folder then
-		for _, car in ipairs(folder:GetChildren()) do
-			if car ~= ownCar and car:IsA("Model") then
-				local other = ChassisSpec.getHull(car)
-				if other and other.Parent then
-					local offset = other.Position - hull.Position
-					if offset.Magnitude <= CFG.ASSIST_RANGE then
-						local toward = MathUtil.flatUnit(offset)
-						local dot = toward ~= Vector3.zero and toward:Dot(axis) or -1
-						if dot > bestDot then
-							best, bestDot = other.Position, dot
-						end
-					end
-				end
-			end
-		end
-	end
-	return best or (hull.Position + axis * CFG.ASSIST_CONVERGE)
-end
-
---[[ The direction the shot actually travels: barrel -> aim point, so it PITCHES down
-	onto the cars instead of flying over them. The aim point already sits on the firing
-	axis and every rig's muzzle is centred in X, so this comes out with zero yaw
-	whenever the cone is zero — there is nothing left for a separate clamp to do. ]]
-local function shotDirection(hull: BasePart, origin: Vector3, flatAim: Vector3): Vector3
-	local delta = aimPointFor(hull) - origin
-	if delta.Magnitude < 1e-3 then
-		return flatAim
-	end
-	return delta.Unit
+	This used to converge on an aim POINT — the nearest car on the axis, or a fixed
+	distance ahead — because the barrel sits eight studs above hull centre and a flat
+	shot from up there flies over every roof. That is now solved on the server, and
+	solved better: the shot LEAVES from hull-centre height (WeaponService.shotOrigin)
+	while the flash still draws at the barrel. So there is nothing left to converge on,
+	and a shot goes exactly where the car is pointing at every range. ]]
+local function shotDirection(hull: BasePart): Vector3
+	return firingAxis(hull)
 end
 
 -- ==========================================================================
@@ -307,18 +264,22 @@ local function tryFire(fromHold: boolean)
 	end
 
 	lastSentAt = now
-	local dir = aimDirection(hull)
+	--[[ ONE direction for all three consumers: the turret's pose, the wire, and the
+		local prediction. Anything else and your own flash points somewhere your shot
+		does not go. ]]
+	local dir = shotDirection(hull)
 	--[[ Aim the turret FIRST, then read the barrel off it: muzzleOrigin returns the rig's
 		live pose, so aiming before measuring puts the shot on the barrel's new heading
 		this frame instead of one frame behind it. ]]
 	safeCall("TurretController", "noteFired", nil, def.id, dir)
 
-	--[[ THE SHOT IS CLIENT-GEOMETRY. Only this machine knows where its turret is
-		pointing, so it sends the barrel it fired from as well as the direction. The
-		server clamps both (Config.WEAPONS.MAX_MUZZLE_OFFSET / AIM_MAX_PITCH_DEG) and
-		still decides damage, ammo and every hit — we contribute geometry, not outcomes. ]]
+	--[[ The client contributes ONE thing to a shot now, and it is COSMETIC: the barrel
+		it fired from, so every machine's muzzle flash blooms on the gun instead of the
+		bonnet. The direction and the point the shot actually leaves from are both the
+		server's (sanitizeAim / shotOrigin). We contribute a flash position — never
+		geometry, and never an outcome. ]]
 	local origin = muzzleOrigin(hull)
-	remote:FireServer(shotDirection(hull, origin, dir), origin)
+	remote:FireServer(dir, origin)
 	predictFire(def.id, origin, dir)
 end
 

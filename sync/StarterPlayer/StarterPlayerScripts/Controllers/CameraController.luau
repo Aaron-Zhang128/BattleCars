@@ -94,14 +94,14 @@ local FOV_BOOST_EXTRA = 6 -- degrees added on top of the speed-driven FOV while 
 local BOOST_PULL_EXTRA = 3 -- studs of extra pull-back while boosting
 local BOOST_BLEND_RATE = 9
 
-local BACK_DISTANCE = 26 -- studs behind the hull at a standstill
+local BACK_DISTANCE = 31 -- studs behind the hull at a standstill
 --[[ How much of a modified body's scale the chase distance follows. NOT 1: a full 2x
 	pull-back on the Juggernaut reads as watching somebody else's car from across the
 	arena, while 0 leaves a 2x body filling the screen with no view of what you are about
 	to ram. 0.6 keeps the monster feeling huge and still shows the road. ]]
 local CAR_SCALE_PULL = 0.6
 local BACK_SPEED_EXTRA = 9 -- extra pull-back at full speed
-local CAMERA_HEIGHT = 10.5 -- studs above the hull
+local CAMERA_HEIGHT = 16 -- studs above the hull
 local LOOK_AHEAD = 18 -- studs in front of the hull the camera aims at
 local LOOK_HEIGHT = 3.5 -- aim point height; lower than CAMERA_HEIGHT = downward pitch
 local POS_DAMP_RATE = 9 -- lower = looser, swingier camera

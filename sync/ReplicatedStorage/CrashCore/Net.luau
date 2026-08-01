@@ -56,6 +56,11 @@
 	                                                        Player's BountyTarget attribute is NOT
 	                                                        written until startedAt + duration, so the
 	                                                        reel landing IS the reveal.
+	                                               "assign" { targetId, targetName, targetBounty }
+	                                                        Same hand-off with NO reel, sent when only
+	                                                        one candidate was left on the field. The
+	                                                        target attribute is already written; the
+	                                                        client just flashes its chip.
 	                                               "claim"  { victimName, amount, wasTarget }
 	                                                        You banked a bounty.
 	                                               "lost"   { }  your mark was wrecked by somebody

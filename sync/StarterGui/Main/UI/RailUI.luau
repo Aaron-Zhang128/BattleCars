@@ -4,7 +4,7 @@
 	NOTHING HERE IS GENERATED. Both pieces are CLONES of authored kit art that already
 	ships in this place:
 		Alternate.SideUI.Left3      -> the right-edge button rail
-		Alternate.SideUI.Counters   -> the coin / best-run counters
+		Alternate.SideUI.Counters   -> the money / best-run counters
 	The kit ScreenGui stays DISABLED and is used purely as a template library, so no
 	piece of it is ever drawn twice.
 
@@ -36,7 +36,7 @@
 	GuiButton inside that clone is hidden, so it passes touches straight through.
 
 	Frame       none registered. This module OPENS windows, it never owns one.
-	Reads       Player attributes  Config.ATTR.COINS, BEST_CROWNS, EQUIPPED
+	Reads       Player attributes  Config.ATTR.MONEY, BEST_CROWNS, EQUIPPED
 	Writes      nothing — no remotes, no attributes.
 
 	Sections:
@@ -275,7 +275,22 @@ local function bindCounters(counters: Instance, conns: { RBXScriptConnection })
 	local speed = counters:FindFirstChild("Speed")
 	hide(counters:FindFirstChild("Boost")) -- no friend boost in this game
 
-	local coinLabel = cash and cash:FindFirstChild("Amount")
+	--[[ The kit gave the Speed counter an icon slot and the Cash counter none — its mock
+		text carried a "$" instead. A bare number on the HUD says nothing about WHICH
+		currency it is, so the money counter borrows Speed's own icon frame (same size,
+		same layout order, same spacing) and wears the cash art the shop and the arena
+		pickup use. Cloned rather than built so it measures like kit art, not like ours. ]]
+	local speedIcon = speed and speed:FindFirstChildWhichIsA("ImageLabel")
+	if cash and speedIcon and not cash:FindFirstChild("MoneyIcon") then
+		local icon = speedIcon:Clone()
+		icon.Name = "MoneyIcon"
+		icon.Image = Config.ART.MONEY
+		icon.ImageColor3 = Color3.new(1, 1, 1) -- art is already cash green; never tint it
+		icon.LayoutOrder = -1 -- ahead of the hidden Buy and the Amount
+		icon.Parent = cash
+	end
+
+	local moneyLabel = cash and cash:FindFirstChild("Amount")
 	local bestLabel = speed and speed:FindFirstChild("Amount")
 	hide(cash and cash:FindFirstChild("Buy"))
 	hide(speed and speed:FindFirstChild("Buy"))
@@ -285,9 +300,9 @@ local function bindCounters(counters: Instance, conns: { RBXScriptConnection })
 		return tonumber(value) or 0
 	end
 
-	local function refreshCoins()
-		if coinLabel and coinLabel:IsA("TextLabel") then
-			coinLabel.Text = MathUtil.comma(readNumber(ATTR.COINS))
+	local function refreshMoney()
+		if moneyLabel and moneyLabel:IsA("TextLabel") then
+			moneyLabel.Text = MathUtil.comma(readNumber(ATTR.MONEY))
 		end
 	end
 
@@ -297,9 +312,9 @@ local function bindCounters(counters: Instance, conns: { RBXScriptConnection })
 		end
 	end
 
-	refreshCoins()
+	refreshMoney()
 	refreshBest()
-	table.insert(conns, player:GetAttributeChangedSignal(ATTR.COINS):Connect(refreshCoins))
+	table.insert(conns, player:GetAttributeChangedSignal(ATTR.MONEY):Connect(refreshMoney))
 	table.insert(conns, player:GetAttributeChangedSignal(ATTR.BEST_CROWNS):Connect(refreshBest))
 end
 

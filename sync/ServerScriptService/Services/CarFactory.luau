@@ -22,8 +22,10 @@
 		Model "Car_<userId>", tagged ChassisSpec.CAR_TAG, PrimaryPart = Hull
 		  Hull            the ONE collidable part, invisible, sized from Config.CARS[i].hull
 		  Hull.RootAtt    Attachment at hull centre
-		  Hull.WeaponMount Attachment on the centreline, MOUNT_CLEARANCE above the
-		                  highest bodywork, facing the way the car drives
+		  Hull.WeaponMount Attachment MOUNT_CLEARANCE above the patch of roof a weapon
+		                  base stands on, facing the way the car drives
+		  Hull.BodyTop    Attachment on the centreline at the top of the bodywork; what
+		                  a nametag clears, never what anything stands on
 		  Hull.Drive      LinearVelocity  (World, force-limited)
 		  Hull.Steer      AlignOrientation (OneAttachment)
 		  Body/           every model part: Massless, non-collidable, welded to the Hull
@@ -67,8 +69,10 @@ local STEER_RESPONSIVENESS = 55
 local STEER_ANGULAR_HEADROOM = 4
 local PREVIEW_FOLDER = "Previews"
 local MODEL_FOLDER = "CarModels"
--- The shipped models' noses point +Z; a chassis drives along -Z. See the header.
-local MODEL_FACING_YAW_DEG = 180
+-- The shipped models' noses point +Z; a chassis drives along -Z. See the header. It
+-- lives in ChassisSpec because ChassisSpec.mountOffset now returns an off-centre point
+-- and has to turn it by the SAME angle this file turns the bodywork by.
+local MODEL_FACING_YAW_DEG = ChassisSpec.MODEL_FACING_YAW_DEG
 -- A cosmetic part casts a shadow only if it is at least this fraction of the car's
 -- largest part. ~230 shadow casters per car is a real mobile cost and the small trim
 -- adds nothing to the silhouette: the big panels alone read as a car-shaped shadow.
@@ -445,6 +449,7 @@ function CarFactory.build(carId: string, ownerUserId: number, mods): Model?
 	-- already be the size the car is going to be.
 	scaleModel(clone, scale)
 	local mountOffset = ChassisSpec.mountOffset(clone) -- BEFORE cosmeticise empties the clone
+	local topOffset = ChassisSpec.topOffset(clone) -- ...and so does the nametag's mark
 	cosmeticise(clone, hull, body, hubs, captureRadius)
 	clone:Destroy()
 
@@ -455,12 +460,12 @@ function CarFactory.build(carId: string, ownerUserId: number, mods): Model?
 		NOT hull.Size.Y * 0.5: carDef.hull is deliberately 2 x GROUND_CLEARANCE shorter
 		than the body, so measuring off the hull would bury the mount inside the roof.
 
-		Measured on all ten shipped models, that AABB top IS the cabin roof on eight of
-		them (gap 0.00) and clears it by 0.70 on the black SUV and 1.31 on the pickup,
-		whose beds drag the central column down. So one rule gives every car a mount that
-		sits on the roofline and can never clip bodywork, spoiler or light bar.
+		mountOffset seats the rig on the surface that actually holds it up rather than on
+		the highest thing near it, and slides it along the car when there is nothing to
+		stand on (the convertible's cockpit). It returns that point ALREADY TURNED by
+		MODEL_FACING_YAW, so it is a hull-space offset here and nothing else is applied.
 
-		Identity rotation is deliberate: a chassis drives along -Z, which is exactly an
+		Identity ROTATION is deliberate: a chassis drives along -Z, which is exactly an
 		Attachment's own LookVector, so anything welded here already points where the car
 		is going, with no per-car correction.
 
@@ -471,6 +476,15 @@ function CarFactory.build(carId: string, ownerUserId: number, mods): Model?
 	mount.Name = ChassisSpec.MOUNT_ATT
 	mount.CFrame = CFrame.new(mountOffset)
 	mount.Parent = hull
+
+	--[[ BODY TOP — the highest point of the bodywork, and the mark a NAMETAG clears.
+		It is a second attachment rather than a reading off the mount because the mount is
+		a place to STAND a gun: it seats on the pickup's bed and slides onto the
+		convertible's bonnet, and a tag hung off either of those sits inside the car. ]]
+	local top = Instance.new("Attachment")
+	top.Name = ChassisSpec.TOP_ATT
+	top.CFrame = CFrame.new(topOffset)
+	top.Parent = hull
 
 	car:SetAttribute(ChassisSpec.ATTR.CAR_ID, carDef.id)
 	car:SetAttribute(ChassisSpec.ATTR.OWNER, ownerUserId)
